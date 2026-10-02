@@ -16,6 +16,36 @@ export interface FinanceDashboard {
   expenses: number;
   netProfit: number;
   pendingBalance: number; // O que falta entrar - o que falta sair
+  pendingIncome: number;
+  pendingExpenses: number;
+}
+
+export function calculateFinanceDashboard(transactions: Transaction[]): FinanceDashboard {
+  let grossRevenue = 0;
+  let expenses = 0;
+  let pendingIncome = 0;
+  let pendingExpenses = 0;
+
+  transactions.forEach(transaction => {
+    const amount = Number(transaction.amount);
+    if (transaction.status === 'pago') {
+      if (transaction.type === 'income') grossRevenue += amount;
+      else expenses += amount;
+    } else if (transaction.type === 'income') {
+      pendingIncome += amount;
+    } else {
+      pendingExpenses += amount;
+    }
+  });
+
+  return {
+    grossRevenue,
+    expenses,
+    netProfit: grossRevenue - expenses,
+    pendingBalance: pendingIncome - pendingExpenses,
+    pendingIncome,
+    pendingExpenses,
+  };
 }
 
 export interface PendingCommission {
@@ -46,29 +76,7 @@ export async function getTransactions(startDate: Date, endDate: Date): Promise<T
 
 export async function getFinanceDashboard(startDate: Date, endDate: Date): Promise<FinanceDashboard> {
   const transactions = await getTransactions(startDate, endDate);
-  
-  let grossRevenue = 0;
-  let expenses = 0;
-  let pendingIncome = 0;
-  let pendingExpense = 0;
-
-  transactions.forEach(t => {
-    const amount = Number(t.amount);
-    if (t.status === 'pago') {
-      if (t.type === 'income') grossRevenue += amount;
-      if (t.type === 'expense') expenses += amount;
-    } else {
-      if (t.type === 'income') pendingIncome += amount;
-      if (t.type === 'expense') pendingExpense += amount;
-    }
-  });
-
-  return {
-    grossRevenue,
-    expenses,
-    netProfit: grossRevenue - expenses,
-    pendingBalance: pendingIncome - pendingExpense
-  };
+  return calculateFinanceDashboard(transactions);
 }
 
 export async function createTransaction(transaction: Partial<Transaction>): Promise<void> {
@@ -121,22 +129,11 @@ export async function getPendingCommissions(): Promise<PendingCommission[]> {
 }
 
 export async function payCommission(professionalId: string, professionalName: string, amount: number, appointmentIds: string[]): Promise<void> {
-  // 1. Gera a despesa no financeiro
-  await createTransaction({
-    description: `Pagamento de Comissão - ${professionalName}`,
-    amount: amount,
-    type: 'expense',
-    category: 'Comissões',
-    payment_method: 'PIX', // Padrão
-    status: 'pago',
-    date: new Date().toISOString()
+  void professionalName;
+  void amount;
+  void appointmentIds;
+  const { error } = await supabase.rpc('pay_professional_commission', {
+    professional_id_input: professionalId,
   });
-
-  // 2. Marca os agendamentos como "comissão paga" para não aparecerem mais na lista
-  const { error } = await supabase
-    .from('appointments')
-    .update({ commission_paid: true })
-    .in('id', appointmentIds);
-
   if (error) throw new Error(error.message);
 }

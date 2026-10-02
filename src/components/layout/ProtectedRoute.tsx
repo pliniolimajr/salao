@@ -5,7 +5,8 @@ import { Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, isAuthorized, loading } = useAuth();
+  const isLocalPreview = import.meta.env.DEV && import.meta.env.VITE_ADMIN_PREVIEW === 'true';
 
   if (loading) {
     return (
@@ -17,8 +18,12 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!user) {
+  if (!user && !isLocalPreview) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (!isAuthorized && !isLocalPreview) {
+    return <Navigate to="/login?error=access_denied" replace />;
   }
 
   return <>{children}</>;

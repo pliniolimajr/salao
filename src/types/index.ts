@@ -7,6 +7,7 @@ export interface UserProfile {
   email: string;
   name: string;
   role: Role;
+  active: boolean;
   avatar_url?: string;
   created_at: string;
 }
@@ -19,6 +20,8 @@ export interface Professional {
   commission_rate: number;
   goals_monthly_revenue: number;
   goals_appointments: number;
+  specialties?: string[];
+  service_ids?: string[];
   off_days?: number[]; // Dias de folga recorrentes (0 = Domingo, 1 = Segunda, etc.)
   created_at: string;
 }
@@ -30,6 +33,7 @@ export interface Service {
   duration_minutes: number;
   category: string; // Ex: Cabelo, Unhas
   active: boolean;
+  price_type?: 'fixed' | 'from' | 'assessment';
 }
 
 export interface Customer {

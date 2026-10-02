@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Search, Sparkles, Phone, Award, Award as Crown, ArrowRight, Loader2, Calendar, Star } from 'lucide-react';
-import { getCustomerByPhone, getCustomerCRMData, CustomerCRMData } from '../services/api/customers';
-import { Customer } from '../types';
+import { getCustomerByPhone, PublicLoyaltyCustomer, CustomerCRMData } from '../services/api/customers';
+import { LOYALTY_POINTS_PER_APPOINTMENT, LOYALTY_REWARD_POINTS, loyaltyProgress } from '../config/loyalty';
+
+const isPreview = import.meta.env.DEV && import.meta.env.VITE_ADMIN_PREVIEW === 'true';
 
 interface LoyaltyModalProps {
   isOpen: boolean;
@@ -12,8 +14,8 @@ interface LoyaltyModalProps {
 export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
-  const [customer, setCustomer] = useState<Customer | null>(null);
-  const [crmData, setCrmData] = useState<CustomerCRMData | null>(null);
+  const [customer, setCustomer] = useState<PublicLoyaltyCustomer | null>(null);
+  const [crmData] = useState<CustomerCRMData | null>(null);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState('');
 
@@ -45,15 +47,13 @@ export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
     setLoading(true);
     setError('');
     try {
-      const data = await getCustomerByPhone(cleanPhone);
+      const data = isPreview
+        ? { name: 'Ana Souza', loyalty_points: 72, is_vip: true, last_visit: new Date(Date.now() - 12 * 86400000).toISOString() } as PublicLoyaltyCustomer
+        : await getCustomerByPhone(cleanPhone);
       if (data) {
         setCustomer(data);
-        // Busca insights de CRM personalizados para dar aquele toque premium extra
-        const crm = await getCustomerCRMData(data.id, data.name);
-        setCrmData(crm);
       } else {
         setCustomer(null);
-        setCrmData(null);
       }
       setSearched(true);
     } catch (err) {
@@ -66,7 +66,6 @@ export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
 
   const resetSearch = () => {
     setCustomer(null);
-    setCrmData(null);
     setSearched(false);
     setPhone('');
     setError('');
@@ -91,15 +90,13 @@ export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 50, scale: 0.95 }}
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="w-full max-w-lg bg-aura-cream border border-aura-charcoal/10 rounded-3xl shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[90vh]"
+        className="w-full max-w-lg bg-aura-cream border border-white/60 rounded-[2rem] shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[92vh]"
       >
         {/* Header */}
-        <div className="h-20 border-b border-aura-charcoal/5 flex items-center justify-between px-8 bg-white/30 backdrop-blur-sm shrink-0">
+        <div className="min-h-20 border-b border-aura-charcoal/5 flex items-center justify-between px-5 py-4 sm:px-8 bg-white/60 backdrop-blur-sm shrink-0">
           <div className="flex items-center gap-3 text-aura-charcoal">
-            <Award className="w-5 h-5 text-aura-gold animate-pulse" />
-            <h3 className="text-xl font-serif italic">
-              Portal de Fidelidade
-            </h3>
+            <Award className="w-5 h-5 text-aura-gold" />
+            <div><p className="text-[9px] font-bold uppercase tracking-[0.2em] text-aura-gold">Seu cuidado conta</p><h3 className="text-xl font-serif">Clube de fidelidade</h3></div>
           </div>
           <button
             onClick={onClose}
@@ -110,7 +107,7 @@ export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
         </div>
 
         {/* Content */}
-        <div className="p-8 overflow-y-auto flex-1">
+        <div className="p-5 sm:p-8 overflow-y-auto flex-1">
           <AnimatePresence mode="wait">
             {!searched ? (
               // STEP 1: Phone Search Input
@@ -126,7 +123,7 @@ export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
                     Acompanhe sua pontuação
                   </h4>
                   <p className="text-xs text-aura-charcoal/60 leading-relaxed max-w-sm mx-auto">
-                    A cada R$ 1,00 gasto no Studio Modesto, você acumula 1 ponto de fidelidade. Complete 100 pontos e resgate uma hidratação ou pé & mão especial de brinde!
+                    A cada atendimento concluído, você acumula {LOYALTY_POINTS_PER_APPOINTMENT} pontos. Complete {LOYALTY_REWARD_POINTS} pontos e resgate uma hidratação ou pé &amp; mão especial de brinde!
                   </p>
                 </div>
 
@@ -197,7 +194,7 @@ export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
                     </div>
                     
                     {/* VIP/Loyalty Badge */}
-                    {(customer.is_vip || customer.loyalty_points >= 80) ? (
+                    {customer.is_vip ? (
                       <div className="flex items-center gap-1 bg-aura-gold/20 border border-aura-gold/40 text-aura-gold text-[9px] uppercase tracking-widest font-bold px-3 py-1 rounded-full">
                         <Crown className="w-3 h-3" /> VIP
                       </div>
@@ -213,7 +210,7 @@ export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
                     <div className="flex justify-between items-end text-xs">
                       <span className="text-white/60 tracking-wider">Progresso do Prêmio</span>
                       <span className="font-serif text-lg text-aura-gold font-medium">
-                        {customer.loyalty_points} <span className="text-xs text-white/40">/ 100 pts</span>
+                        {customer.loyalty_points} <span className="text-xs text-white/40">/ {LOYALTY_REWARD_POINTS} pts</span>
                       </span>
                     </div>
 
@@ -221,7 +218,7 @@ export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
                     <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
                       <motion.div
                         initial={{ width: 0 }}
-                        animate={{ width: `${Math.min(customer.loyalty_points, 100)}%` }}
+                        animate={{ width: `${loyaltyProgress(customer.loyalty_points)}%` }}
                         transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
                         className="h-full bg-gradient-to-r from-aura-gold via-[#D8BC8C] to-aura-gold rounded-full"
                       />
@@ -230,13 +227,13 @@ export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
 
                   {/* Dynamic Motivational Copy */}
                   <div className="text-center pt-2">
-                    {customer.loyalty_points >= 100 ? (
+                    {customer.loyalty_points >= LOYALTY_REWARD_POINTS ? (
                       <p className="text-xs text-aura-gold font-semibold flex items-center justify-center gap-1">
-                        <Sparkles className="w-4 h-4 animate-bounce" /> 100% Completo! Seu brinde está disponível.
+                        <Sparkles className="w-4 h-4 animate-bounce" /> Meta completa! Seu brinde está disponível.
                       </p>
                     ) : (
                       <p className="text-[11px] text-white/50 leading-relaxed font-light">
-                        Faltam apenas <strong className="text-aura-gold font-bold">{100 - customer.loyalty_points} pontos</strong> para resgatar sua recompensa gratuita!
+                        Faltam apenas <strong className="text-aura-gold font-bold">{LOYALTY_REWARD_POINTS - customer.loyalty_points} pontos</strong> para resgatar sua recompensa gratuita!
                       </p>
                     )}
                   </div>

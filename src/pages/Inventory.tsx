@@ -9,6 +9,22 @@ import { motion, AnimatePresence } from 'motion/react';
 import { format, differenceInDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
+const isPreview = import.meta.env.DEV && import.meta.env.VITE_ADMIN_PREVIEW === 'true';
+
+const futureDate = (days: number) => {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+};
+
+const previewItems: InventoryItem[] = [
+  { id: 'preview-1', name: 'Máscara de hidratação', category: 'Uso Interno', quantity: 2, min_quantity: 5, cost_price: 48, expiration_date: futureDate(18) },
+  { id: 'preview-2', name: 'Shampoo profissional', category: 'Uso Interno', quantity: 8, min_quantity: 3, cost_price: 62, expiration_date: futureDate(160) },
+  { id: 'preview-3', name: 'Óleo finalizador', category: 'Revenda', quantity: 5, min_quantity: 2, cost_price: 39, expiration_date: futureDate(90) },
+  { id: 'preview-4', name: 'Esmalte nude clássico', category: 'Uso Interno', quantity: 1, min_quantity: 4, cost_price: 9.9, expiration_date: futureDate(240) },
+  { id: 'preview-5', name: 'Leave-in proteção térmica', category: 'Revenda', quantity: 6, min_quantity: 3, cost_price: 44.5, expiration_date: futureDate(26) },
+];
+
 // --- DRAWER COMPONENT ---
 function Drawer({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode; }) {
   useEffect(() => {
@@ -22,7 +38,7 @@ function Drawer({ open, onClose, title, children }: { open: boolean; onClose: ()
       {open && (
         <>
           <motion.div key="backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40" onClick={onClose} />
-          <motion.div key="drawer" initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 28, stiffness: 260 }} className="fixed right-0 top-0 h-full w-full max-w-md bg-aura-cream shadow-2xl z-50 flex flex-col border-l border-aura-charcoal/5">
+          <motion.div key="drawer" initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 28, stiffness: 260 }} className="fixed right-0 top-0 h-full w-full max-w-xl bg-aura-cream shadow-2xl z-50 flex flex-col border-l border-aura-charcoal/10">
             <div className="flex items-center justify-between px-6 py-5 border-b border-aura-charcoal/5 bg-white/50 backdrop-blur-md">
               <h2 className="font-serif text-xl italic">{title}</h2>
               <button onClick={onClose} className="p-2 rounded-full hover:bg-aura-soft-gray transition-colors text-aura-charcoal/40 hover:text-aura-charcoal">
@@ -69,6 +85,10 @@ export function Inventory() {
   const fetchInventory = async () => {
     try {
       setLoading(true);
+      if (isPreview) {
+        setItems(previewItems);
+        return;
+      }
       const data = await getInventory();
       setItems(data);
     } catch (error) { console.error(error); } finally { setLoading(false); }
@@ -91,6 +111,15 @@ export function Inventory() {
     setHistory([]);
     setIsConfirmingDelete(false);
     setLoadingHistory(true);
+
+    if (isPreview) {
+      setHistory([
+        { id: `${item.id}-movement-1`, inventory_id: item.id, type: 'out', quantity: 1, reason: 'Uso no Atendimento', created_at: new Date(Date.now() - 86400000).toISOString() },
+        { id: `${item.id}-movement-2`, inventory_id: item.id, type: 'in', quantity: 4, reason: 'Compra de Fornecedor', created_at: new Date(Date.now() - 604800000).toISOString() },
+      ]);
+      setLoadingHistory(false);
+      return;
+    }
     
     try {
       const data = await getItemHistory(item.id);
@@ -104,11 +133,25 @@ export function Inventory() {
     setIsSaving(true);
     try {
       if (isCreatingItem) {
+        if (isPreview) {
+          const createdItem: InventoryItem = {
+            id: `preview-${Date.now()}`,
+            name: itemForm.name,
+            category: itemForm.category || 'Uso Interno',
+            quantity: itemForm.quantity || 0,
+            min_quantity: itemForm.min_quantity || 0,
+            cost_price: itemForm.cost_price || 0,
+            expiration_date: itemForm.expiration_date || null,
+          };
+          setItems(prev => [createdItem, ...prev]);
+          setIsCreatingItem(false);
+          return;
+        }
         await createInventoryItem(itemForm);
         await fetchInventory();
         setIsCreatingItem(false);
       } else if (isEditingItem && selectedItem) {
-        await updateInventoryItem(selectedItem.id, itemForm);
+        if (!isPreview) await updateInventoryItem(selectedItem.id, itemForm);
         const updatedItem = { ...selectedItem, ...itemForm } as InventoryItem;
         setItems(prev => prev.map(i => i.id === selectedItem.id ? updatedItem : i));
         setSelectedItem(updatedItem);
@@ -125,15 +168,23 @@ export function Inventory() {
     if (!selectedItem || adjustAmount <= 0) return;
     setIsSaving(true);
     try {
-      await adjustStock(selectedItem.id, selectedItem.quantity, adjustAmount, adjustType, adjustReason);
       const newQty = adjustType === 'in' ? selectedItem.quantity + adjustAmount : selectedItem.quantity - adjustAmount;
+      if (newQty < 0) {
+        alert('A saída não pode ser maior que a quantidade disponível.');
+        return;
+      }
+      if (!isPreview) await adjustStock(selectedItem.id, selectedItem.quantity, adjustAmount, adjustType, adjustReason);
       const updatedItem = { ...selectedItem, quantity: newQty };
       
       setItems(prev => prev.map(i => i.id === selectedItem.id ? updatedItem : i));
       setSelectedItem(updatedItem);
       
-      const newHistory = await getItemHistory(selectedItem.id);
-      setHistory(newHistory);
+      if (isPreview) {
+        setHistory(prev => [{ id: `movement-${Date.now()}`, inventory_id: selectedItem.id, type: adjustType, quantity: adjustAmount, reason: adjustReason, created_at: new Date().toISOString() }, ...prev]);
+      } else {
+        const newHistory = await getItemHistory(selectedItem.id);
+        setHistory(newHistory);
+      }
       setAdjustAmount(1);
     } catch (error: any) {
       alert(error.message || "Erro ao ajustar estoque.");
@@ -146,7 +197,7 @@ export function Inventory() {
     if (!selectedItem) return;
     setIsSaving(true);
     try {
-      await deleteInventoryItem(selectedItem.id);
+      if (!isPreview) await deleteInventoryItem(selectedItem.id);
       setItems(prev => prev.filter(i => i.id !== selectedItem.id));
       setSelectedItem(null);
     } catch (error: any) {
@@ -170,23 +221,39 @@ export function Inventory() {
 
   return (
     <div className="space-y-6">
-      
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="glass-card p-6 flex items-center gap-4 border border-aura-charcoal/5">
+
+      <section className="glass-card overflow-hidden border border-aura-charcoal/5">
+        <div className="flex flex-col gap-6 p-6 sm:p-8 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-xl">
+            <p className="admin-kicker">Operação &amp; produtos</p>
+            <h3 className="mt-2 font-serif text-3xl text-aura-charcoal sm:text-4xl">Estoque sob controle.</h3>
+            <p className="mt-3 text-sm leading-relaxed text-aura-charcoal/55">Acompanhe insumos, produtos para revenda e alertas antes que eles interrompam a rotina do salão.</p>
+          </div>
+          <button onClick={handleOpenCreate} className="aura-button aura-button-primary flex w-full items-center justify-center gap-2 shadow-lg shadow-aura-charcoal/10 sm:w-auto">
+            <Plus className="w-4 h-4" /> Novo produto
+          </button>
+        </div>
+        <div className="border-t border-aura-charcoal/5 bg-aura-charcoal px-6 py-4 text-white sm:px-8">
+          <p className="text-xs leading-relaxed text-white/65"><span className="font-bold text-white">Visão rápida:</span> {criticalItems > 0 ? `${criticalItems} ${criticalItems === 1 ? 'item precisa' : 'itens precisam'} de reposição.` : 'nenhum item precisa de reposição.'}</p>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
+        <div className="glass-card p-6 flex items-center gap-4 border border-aura-charcoal/5 min-h-32">
           <div className="p-4 rounded-full bg-aura-gold/10 text-aura-gold"><DollarSign className="w-6 h-6" /></div>
           <div>
-            <p className="text-[10px] text-aura-charcoal/40 uppercase tracking-widest font-bold">Compras</p>
+            <p className="text-[10px] text-aura-charcoal/40 uppercase tracking-widest font-bold">Valor em estoque</p>
             <p className="text-2xl font-serif text-aura-charcoal">R$ {totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
           </div>
         </div>
-        <div className="glass-card p-6 flex items-center gap-4 border border-aura-charcoal/5">
+        <div className="glass-card p-6 flex items-center gap-4 border border-aura-charcoal/5 min-h-32">
           <div className="p-4 rounded-full bg-red-50 text-red-500"><AlertTriangle className="w-6 h-6" /></div>
           <div>
             <p className="text-[10px] text-aura-charcoal/40 uppercase tracking-widest font-bold">Abaixo do Mínimo</p>
             <p className="text-2xl font-serif text-aura-charcoal">{criticalItems} produtos</p>
           </div>
         </div>
-        <div className="glass-card p-6 flex items-center gap-4 border border-aura-charcoal/5">
+        <div className="glass-card p-6 flex items-center gap-4 border border-aura-charcoal/5 min-h-32">
           <div className="p-4 rounded-full bg-orange-50 text-orange-500"><CalendarClock className="w-6 h-6" /></div>
           <div>
             <p className="text-[10px] text-aura-charcoal/40 uppercase tracking-widest font-bold">Vence em 30 dias</p>
@@ -195,8 +262,8 @@ export function Inventory() {
         </div>
       </div>
 
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white/40 p-6 rounded-3xl border border-aura-charcoal/5 shadow-sm">
-        <div className="flex gap-2 p-1 bg-aura-soft-gray rounded-full">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white/55 p-4 sm:p-5 rounded-3xl border border-aura-charcoal/5 shadow-sm">
+        <div className="flex gap-1 overflow-x-auto p-1 bg-aura-soft-gray rounded-full">
           {['Todos', 'Uso Interno', 'Revenda'].map(cat => (
             <button 
               key={cat}
@@ -208,8 +275,8 @@ export function Inventory() {
           ))}
         </div>
         
-        <div className="flex items-center gap-4 w-full md:w-auto">
-          <div className="relative w-full md:w-64">
+        <div className="flex items-center gap-4 w-full lg:w-auto">
+          <div className="relative w-full lg:w-72">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-aura-charcoal/40" />
             <input 
               placeholder="Buscar produto..." 
@@ -218,13 +285,10 @@ export function Inventory() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <button onClick={handleOpenCreate} className="aura-button aura-button-primary flex items-center gap-2 shadow-lg shadow-aura-charcoal/10 whitespace-nowrap">
-            <Plus className="w-4 h-4" /> Novo
-          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
         {filteredItems.map((item, i) => {
           const isCritical = item.quantity <= item.min_quantity;
           const daysToExpire = item.expiration_date ? differenceInDays(new Date(item.expiration_date), new Date()) : 999;
@@ -236,7 +300,7 @@ export function Inventory() {
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
               onClick={() => handleOpenItem(item)}
               className={cn(
-                "glass-card p-6 cursor-pointer transition-all hover:shadow-md border",
+                "glass-card min-h-64 p-6 cursor-pointer transition-all hover:-translate-y-1 hover:shadow-lg border",
                 isCritical ? "border-red-200 bg-red-50/30" : "border-aura-charcoal/5 hover:border-aura-gold/30"
               )}
             >
@@ -266,6 +330,13 @@ export function Inventory() {
             </motion.div>
           )
         })}
+        {filteredItems.length === 0 && (
+          <div className="glass-card col-span-full flex min-h-64 flex-col items-center justify-center border border-dashed border-aura-charcoal/15 p-8 text-center">
+            <Package className="mb-4 h-8 w-8 text-aura-gold" />
+            <h4 className="font-serif text-xl text-aura-charcoal">Nenhum produto por aqui.</h4>
+            <p className="mt-2 text-sm text-aura-charcoal/50">Ajuste a busca ou cadastre um novo item.</p>
+          </div>
+        )}
       </div>
 
       <Drawer 
@@ -290,7 +361,7 @@ export function Inventory() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {isCreatingItem ? (
                   <div className="space-y-1">
                     <label className="text-[10px] uppercase tracking-widest text-aura-charcoal/40 font-bold">Qtd. Inicial</label>
@@ -309,7 +380,7 @@ export function Inventory() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] uppercase tracking-widest text-aura-charcoal/40 font-bold text-aura-sage">Preço de Custo (R$)</label>
                   <input type="number" step="0.01" className="w-full bg-white border border-green-200 rounded-xl px-4 py-3 text-sm outline-none" value={itemForm.cost_price} onChange={e => setItemForm({...itemForm, cost_price: Number(e.target.value)})} />
@@ -358,12 +429,12 @@ export function Inventory() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="col-span-1 space-y-1">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
                     <label className="text-[9px] uppercase tracking-widest text-aura-charcoal/40 font-bold">Qtd</label>
                     <input type="number" min="1" className="w-full bg-aura-soft-gray border-none rounded-xl px-3 py-2 text-sm outline-none font-bold text-center" value={adjustAmount} onChange={e => setAdjustAmount(Number(e.target.value))} />
                   </div>
-                  <div className="col-span-2 space-y-1">
+                  <div className="sm:col-span-2 space-y-1">
                     <label className="text-[9px] uppercase tracking-widest text-aura-charcoal/40 font-bold">Motivo (Obrigatório)</label>
                     <select className="w-full bg-aura-soft-gray border-none rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 ring-aura-gold/20" value={adjustReason} onChange={e => setAdjustReason(e.target.value)}>
                       {adjustType === 'out' ? (

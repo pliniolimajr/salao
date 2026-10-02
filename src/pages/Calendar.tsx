@@ -37,6 +37,7 @@ export function Calendar() {
   const [selectedProf, setSelectedProf] = useState<string>('all');
 
   const [editingApptId, setEditingApptId] = useState<string | null>(null);
+  const [originalStatus, setOriginalStatus] = useState<AppointmentStatus | null>(null);
   const [formAppt, setFormAppt] = useState<Partial<Appointment>>(INITIAL_APPT);
 
   // ✅ Estados para Multi-Serviços e Criação de Novo
@@ -46,6 +47,35 @@ export function Calendar() {
   const [isSavingService, setIsSavingService] = useState(false);
 
   const fetchData = useCallback(async () => {
+    const isLocalPreview = import.meta.env.DEV && import.meta.env.VITE_ADMIN_PREVIEW === 'true';
+    if (isLocalPreview) {
+      const weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
+      const at = (dayOffset: number, hour: number, minute = 0) => {
+        const date = addDays(weekStart, dayOffset);
+        date.setHours(hour, minute, 0, 0);
+        return date.toISOString();
+      };
+      const previewProfessionals: Professional[] = [
+        { id: 'preview-ana', name: 'Ana Modesto', role: 'Cabeleireira', active: true, commission_rate: 35, goals_monthly_revenue: 8000, goals_appointments: 60, off_days: [0], created_at: new Date().toISOString() },
+        { id: 'preview-julia', name: 'Júlia Santos', role: 'Manicure', active: true, commission_rate: 30, goals_monthly_revenue: 5000, goals_appointments: 70, off_days: [1], created_at: new Date().toISOString() },
+      ];
+      const previewServices: Service[] = [
+        { id: 'preview-cut', name: 'Corte e escova', price: 120, duration_minutes: 90, category: 'Cabelo', active: true },
+        { id: 'preview-nails', name: 'Manicure', price: 55, duration_minutes: 60, category: 'Mãos e pés', active: true },
+        { id: 'preview-care', name: 'Tratamento facial', price: 150, duration_minutes: 60, category: 'Pele', active: true },
+      ];
+      setProfessionals(previewProfessionals);
+      setServices(previewServices);
+      setAppointments([
+        { id: 'preview-a1', professional_id: 'preview-ana', customer_name: 'Mariana Souza', customer_phone: '71999999999', service_name: 'Corte e escova', price: 120, start_time: at(2, 10), end_time: at(2, 11, 30), status: 'confirmed', is_blocked: false, created_at: new Date().toISOString() },
+        { id: 'preview-a2', professional_id: 'preview-julia', customer_name: 'Cláudia Santos', customer_phone: '71988888888', service_name: 'Manicure', price: 55, start_time: at(2, 13, 30), end_time: at(2, 14, 30), status: 'scheduled', is_blocked: false, created_at: new Date().toISOString() },
+        { id: 'preview-a3', professional_id: 'preview-ana', customer_name: 'Rafaela Lima', service_name: 'Tratamento facial', price: 150, start_time: at(4, 15), end_time: at(4, 16), status: 'confirmed', is_blocked: false, created_at: new Date().toISOString() },
+        { id: 'preview-block', professional_id: 'preview-julia', customer_name: 'HORÁRIO BLOQUEADO', service_name: 'Almoço', price: 0, start_time: at(5, 12), end_time: at(5, 13), status: 'blocked', is_blocked: true, created_at: new Date().toISOString() },
+      ]);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       const start = viewMode === 'week' ? startOfWeek(currentDate, { weekStartsOn: 0 }) : startOfDay(currentDate);
@@ -98,6 +128,14 @@ export function Calendar() {
   // ✅ Função para criar serviço na hora
   const handleCreateNewService = async () => {
     if (!newService.name) return;
+    if (import.meta.env.DEV && import.meta.env.VITE_ADMIN_PREVIEW === 'true') {
+      const created: Service = { id: `preview-service-${Date.now()}`, ...newService, category: 'Personalizado', active: true };
+      setServices(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setIsCreatingService(false);
+      setNewService({ name: '', price: 0, duration_minutes: 60 });
+      toggleService(created);
+      return;
+    }
     setIsSavingService(true);
     try {
       const created = await createService({ ...newService, active: true });
@@ -114,6 +152,10 @@ export function Calendar() {
 
   const handleSaveAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (originalStatus === 'completed' && formAppt.status !== 'completed') {
+      alert('Um atendimento concluído não pode voltar para outro status, pois já gerou faturamento e fidelidade.');
+      return;
+    }
     try {
       const start = new Date(formAppt.start_time as string);
 
@@ -129,6 +171,16 @@ export function Calendar() {
         status: formAppt.is_blocked ? 'blocked' : formAppt.status
       } as Appointment;
 
+      if (import.meta.env.DEV && import.meta.env.VITE_ADMIN_PREVIEW === 'true') {
+        if (editingApptId) {
+          setAppointments(prev => prev.map(item => item.id === editingApptId ? { ...item, ...apptData } : item));
+        } else {
+          setAppointments(prev => [...prev, { ...apptData, id: `preview-appt-${Date.now()}`, created_at: new Date().toISOString() }]);
+        }
+        setIsModalOpen(false);
+        return;
+      }
+
       if (editingApptId) {
         await updateAppointmentFull(editingApptId, apptData);
       } else {
@@ -138,13 +190,27 @@ export function Calendar() {
       setIsModalOpen(false);
       fetchData();
     } catch (error) {
-      alert("Erro ao salvar agendamento.");
+      const message = error instanceof Error ? error.message : '';
+      if (message.includes('appointments_no_overlap') || message.includes('exclusion')) {
+        alert('Este profissional já possui um compromisso nesse horário. Escolha outro horário.');
+      } else {
+        alert("Não foi possível salvar o agendamento. Confira os dados e tente novamente.");
+      }
     }
   };
 
   const handleDelete = async () => {
     if (!editingApptId) return;
+    if (originalStatus === 'completed') {
+      alert('Atendimentos concluídos não podem ser excluídos, pois possuem movimentações financeiras e de fidelidade vinculadas.');
+      return;
+    }
     if (confirm('Tem certeza que deseja excluir este agendamento?')) {
+      if (import.meta.env.DEV && import.meta.env.VITE_ADMIN_PREVIEW === 'true') {
+        setAppointments(prev => prev.filter(item => item.id !== editingApptId));
+        setIsModalOpen(false);
+        return;
+      }
       try {
         await deleteAppointment(editingApptId);
         setIsModalOpen(false);
@@ -157,6 +223,7 @@ export function Calendar() {
 
   const openModalForNew = () => {
     setEditingApptId(null);
+    setOriginalStatus(null);
     setFormAppt(INITIAL_APPT);
     setSelectedServices([]); // Limpa seleção
     setIsModalOpen(true);
@@ -164,6 +231,7 @@ export function Calendar() {
 
   const openModalForEdit = (appt: Appointment) => {
     setEditingApptId(appt.id);
+    setOriginalStatus(appt.status);
     setFormAppt({
       ...appt,
       start_time: format(new Date(appt.start_time), "yyyy-MM-dd'T'HH:mm")
@@ -233,8 +301,14 @@ export function Calendar() {
   return (
     <div className="space-y-6">
       {/* Header da Agenda */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-white/40 p-6 rounded-3xl border border-aura-charcoal/5 shadow-sm">
-        <div className="flex items-center gap-6">
+      <div className="glass-card flex flex-col justify-between gap-6 p-5 sm:p-7 xl:flex-row xl:items-center">
+        <div className="space-y-5">
+          <div>
+            <p className="admin-kicker">Organização do dia</p>
+            <h2 className="mt-1 font-serif text-3xl font-semibold">Agenda do salão</h2>
+            <p className="mt-1 text-sm text-aura-charcoal/50">Visualize atendimentos, bloqueios e disponibilidade da equipe.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
           <div className="flex bg-aura-soft-gray rounded-full p-1">
             <button onClick={() => setViewMode('day')} className={cn("px-6 py-2 rounded-full text-[10px] uppercase tracking-widest font-bold transition-all", viewMode === 'day' ? "bg-aura-charcoal text-white shadow-md" : "text-aura-charcoal/40 hover:text-aura-charcoal")}>
               Dia
@@ -244,11 +318,11 @@ export function Calendar() {
             </button>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             <button onClick={() => setCurrentDate(viewMode === 'week' ? subWeeks(currentDate, 1) : addDays(currentDate, -1))} className="p-2 hover:bg-white rounded-full transition-all border border-transparent hover:border-aura-charcoal/5">
               <ChevronLeft className="w-5 h-5" />
             </button>
-            <h3 className="text-xl font-serif italic min-w-[200px] text-center">
+            <h3 className="min-w-[150px] text-center font-serif text-lg font-semibold sm:min-w-[200px] sm:text-xl">
               {format(currentDate, viewMode === 'week' ? "MMMM yyyy" : "dd 'de' MMMM", { locale: ptBR })}
             </h3>
             <button onClick={() => setCurrentDate(viewMode === 'week' ? addWeeks(currentDate, 1) : addDays(currentDate, 1))} className="p-2 hover:bg-white rounded-full transition-all border border-transparent hover:border-aura-charcoal/5">
@@ -256,12 +330,13 @@ export function Calendar() {
             </button>
           </div>
         </div>
+        </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="relative">
             <User className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-aura-charcoal/40" />
             <select
-              className="bg-white border border-aura-charcoal/10 rounded-full pl-8 pr-4 py-2 text-xs outline-none focus:ring-2 ring-aura-gold/20 cursor-pointer"
+              className="w-full bg-white border border-aura-charcoal/10 rounded-lg pl-8 pr-4 py-3 text-xs outline-none cursor-pointer sm:w-auto"
               value={selectedProf}
               onChange={(e) => setSelectedProf(e.target.value)}
             >
@@ -269,7 +344,7 @@ export function Calendar() {
               {professionals.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
-          <button onClick={openModalForNew} className="aura-button aura-button-primary flex items-center gap-2 shadow-lg shadow-aura-charcoal/10">
+          <button onClick={openModalForNew} className="aura-button aura-button-primary flex items-center justify-center gap-2 rounded-lg shadow-lg shadow-aura-charcoal/10">
             <Plus className="w-4 h-4" /> Novo Agendamento
           </button>
         </div>
@@ -280,7 +355,8 @@ export function Calendar() {
           <Loader2 className="w-10 h-10 animate-spin text-aura-gold" />
         </div>
       ) : (
-        <div className={cn("grid gap-6", viewMode === 'week' ? "grid-cols-7" : "grid-cols-1 max-w-3xl mx-auto")}>
+        <div className="overflow-x-auto pb-3">
+        <div className={cn("grid gap-4", viewMode === 'week' ? "grid-cols-7 min-w-[1050px]" : "grid-cols-1 max-w-3xl mx-auto")}>
           {weekDays.map((day, i) => {
             const profObj = selectedProf !== 'all' ? professionals.find(p => p.id === selectedProf) : null;
             const isOffDayForProf = profObj?.off_days?.includes(day.getDay());
@@ -360,17 +436,18 @@ export function Calendar() {
             );
           })}
         </div>
+        </div>
       )}
 
       {/* Modal de Edição/Criação Total */}
       <AnimatePresence>
         {isModalOpen && (
-          <div className="fixed inset-0 bg-aura-charcoal/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="fixed inset-0 bg-aura-charcoal/45 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-6">
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="glass-card p-8 max-w-md w-full space-y-6 bg-white max-h-[90vh] overflow-y-auto"
+              className="glass-card max-h-[92vh] w-full max-w-2xl space-y-6 overflow-y-auto bg-white p-5 sm:p-8"
             >
               <div className="flex justify-between items-center pb-2 border-b border-aura-charcoal/5">
                 <div className="flex items-center gap-3">
@@ -413,16 +490,9 @@ export function Calendar() {
                     <input required className="w-full bg-aura-soft-gray border-none rounded-xl px-4 py-3 outline-none text-sm focus:ring-2 ring-aura-gold/20" value={formAppt.customer_name} onChange={e => setFormAppt({ ...formAppt, customer_name: e.target.value })} />
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-[10px] uppercase tracking-widest text-aura-charcoal/40 font-bold">
-                      {formAppt.is_blocked ? 'Motivo do Bloqueio' : 'Nome do Cliente'}
-                    </label>
-                    <input required className="w-full bg-aura-soft-gray border-none rounded-xl px-4 py-3 outline-none text-sm focus:ring-2 ring-aura-gold/20" value={formAppt.customer_name} onChange={e => setFormAppt({...formAppt, customer_name: e.target.value})} />
-                  </div>
-
                   {/* NOVOS CAMPOS AQUI */}
                   {!formAppt.is_blocked && (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div className="space-y-1">
                         <label className="text-[10px] uppercase tracking-widest text-aura-charcoal/40 font-bold">WhatsApp</label>
                         <input className="w-full bg-aura-soft-gray border-none rounded-xl px-4 py-3 outline-none text-sm" value={formAppt.customer_phone || ''} onChange={e => setFormAppt({...formAppt, customer_phone: e.target.value})} placeholder="(00) 00000-0000" />
@@ -506,7 +576,7 @@ export function Calendar() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-1">
                       <label className="text-[10px] uppercase tracking-widest text-aura-charcoal/40 font-bold">Profissional</label>
                       <select required className="w-full bg-aura-soft-gray border-none rounded-xl px-4 py-3 outline-none text-sm focus:ring-2 ring-aura-gold/20" value={formAppt.professional_id} onChange={e => setFormAppt({ ...formAppt, professional_id: e.target.value })}>
@@ -556,17 +626,23 @@ export function Calendar() {
                         value={formAppt.status}
                         onChange={e => setFormAppt({ ...formAppt, status: e.target.value as AppointmentStatus })}
                       >
-                        <option value="scheduled">🟡 Pendente (A Confirmar)</option>
-                        <option value="confirmed">🟢 Confirmado pelo Salão</option>
-                        <option value="completed">⚪ Concluído (Gera Faturação)</option>
-                        <option value="cancelled">🔴 Cancelado</option>
+                        {originalStatus === 'completed' ? (
+                          <option value="completed">⚪ Concluído (faturamento já gerado)</option>
+                        ) : (
+                          <>
+                            <option value="scheduled">🟡 Pendente (a confirmar)</option>
+                            <option value="confirmed">🟢 Confirmado pelo salão</option>
+                            <option value="completed">⚪ Concluído (gera faturamento)</option>
+                            <option value="cancelled">🔴 Cancelado</option>
+                          </>
+                        )}
                       </select>
                     </div>
                   )}
                 </div>
 
                 <div className="flex gap-3 pt-4 border-t border-aura-charcoal/5">
-                  {editingApptId && (
+                  {editingApptId && originalStatus !== 'completed' && (
                     <button type="button" onClick={handleDelete} className="p-3 rounded-xl bg-red-50 text-red-500 hover:bg-red-100 transition-colors border border-red-100" title="Excluir Agendamento">
                       <Trash2 className="w-5 h-5" />
                     </button>

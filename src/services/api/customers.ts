@@ -31,6 +31,15 @@ export async function updateCustomer(id: string, updates: Partial<Customer>): Pr
   if (error) throw new Error(error.message);
 }
 
+export async function adjustCustomerLoyaltyPoints(customerId: string, points: number): Promise<void> {
+  const { error } = await supabase.rpc('increment_loyalty_points', {
+    cust_id: customerId,
+    points,
+  });
+
+  if (error) throw new Error(error.message);
+}
+
 // Nova função monstro de CRM
 export interface CustomerCRMData {
   completedHistory: Appointment[];
@@ -38,6 +47,10 @@ export interface CustomerCRMData {
   ltv: number;
   favoriteProfessional: string;
 }
+
+export type PublicLoyaltyCustomer = Pick<Customer, 'id' | 'name' | 'loyalty_points' | 'is_vip'> & {
+  last_visit?: string;
+};
 
 export async function getCustomerCRMData(customerId: string, customerName: string): Promise<CustomerCRMData> {
   // Puxa os agendamentos pelo ID ou pelo Nome exato (para garantir que pega os legados)
@@ -89,30 +102,14 @@ export async function getCustomerCRMData(customerId: string, customerName: strin
   };
 }
 
-export async function getCustomerByPhone(phone: string): Promise<Customer | null> {
+export async function getCustomerByPhone(phone: string): Promise<PublicLoyaltyCustomer | null> {
   const cleanPhone = phone.replace(/\D/g, '');
   if (!cleanPhone) return null;
 
-  const { data, error } = await supabase
-    .from('customers')
-    .select('*');
+  const { data, error } = await supabase.rpc('get_public_loyalty', { phone_input: cleanPhone });
 
   if (error) throw new Error(error.message);
 
   // Normalização robusta para comparar números brasileiros (ignora DDI 55 ou zero à esquerda)
-  const normalize = (num: string) => {
-    let cleaned = num.replace(/\D/g, '');
-    if (cleaned.startsWith('55') && cleaned.length > 10) {
-      cleaned = cleaned.slice(2);
-    }
-    if (cleaned.startsWith('0') && cleaned.length > 9) {
-      cleaned = cleaned.slice(1);
-    }
-    return cleaned;
-  };
-
-  const cleanSearch = normalize(cleanPhone);
-
-  const customer = data?.find(c => normalize(c.phone || '') === cleanSearch) || null;
-  return customer;
+  return (data?.[0] as PublicLoyaltyCustomer | undefined) || null;
 }

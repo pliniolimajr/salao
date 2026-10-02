@@ -55,14 +55,14 @@ export async function getItemHistory(inventoryId: string): Promise<InventoryMove
 }
 
 export async function adjustStock(inventoryId: string, currentQuantity: number, changeAmount: number, type: 'in' | 'out', reason: string): Promise<void> {
-  const newQuantity = type === 'in' ? currentQuantity + changeAmount : currentQuantity - changeAmount;
-  if (newQuantity < 0) throw new Error("O estoque não pode ficar negativo.");
-
-  const { error: updateError } = await supabase.from('inventory').update({ quantity: newQuantity }).eq('id', inventoryId);
-  if (updateError) throw new Error(updateError.message);
-
-  const { error: logError } = await supabase.from('inventory_movements').insert([{ inventory_id: inventoryId, type: type, quantity: changeAmount, reason: reason }]);
-  if (logError) throw new Error(logError.message);
+  void currentQuantity;
+  const { error } = await supabase.rpc('adjust_inventory_stock', {
+    inventory_id_input: inventoryId,
+    quantity_input: changeAmount,
+    movement_type_input: type,
+    reason_input: reason,
+  });
+  if (error) throw new Error(error.message);
 }
 
 export async function deleteInventoryItem(id: string): Promise<void> {

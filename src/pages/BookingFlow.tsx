@@ -18,8 +18,8 @@ import { cn } from "../utils/cn"; // Ajusta o caminho se necessário
 
 // Importações dos nossos serviços API
 import { getActiveServices } from "../services/api/services";
-import { getProfessionals } from "../services/api/professionals";
-import { createAppointment } from "../services/api/appointments";
+import { getBookingProfessionals } from "../services/api/professionals";
+import { createPublicAppointment, getPublicBookedIntervals, BookedInterval } from "../services/api/appointments";
 import { getCustomerByPhone } from "../services/api/customers";
 import { Service, Professional } from "../types";
 
@@ -27,6 +27,22 @@ interface BookingFlowProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
+const isPreview = import.meta.env.DEV && import.meta.env.VITE_ADMIN_PREVIEW === "true";
+
+const previewServices: Service[] = [
+  { id: "service-1", name: "Escova", price: 55, duration_minutes: 60, category: "Cabelo", active: true },
+  { id: "service-2", name: "Corte feminino", price: 70, duration_minutes: 60, category: "Cabelo", active: true },
+  { id: "service-3", name: "Hidratação", price: 65, duration_minutes: 60, category: "Tratamento", active: true },
+  { id: "service-4", name: "Coloração", price: 150, duration_minutes: 120, category: "Cabelo", active: true },
+  { id: "service-5", name: "Manicure", price: 35, duration_minutes: 60, category: "Unhas", active: true },
+  { id: "service-6", name: "Pé e mão", price: 65, duration_minutes: 90, category: "Unhas", active: true },
+];
+
+const previewProfessionals: Professional[] = [
+  { id: "professional-1", name: "Carla Santos", role: "Cabeleireira", active: true, commission_rate: 40, goals_monthly_revenue: 8000, goals_appointments: 80, service_ids: ["service-1", "service-2", "service-3", "service-4"], off_days: [0, 1], created_at: new Date().toISOString() },
+  { id: "professional-2", name: "Jéssica Lima", role: "Manicure", active: true, commission_rate: 35, goals_monthly_revenue: 6000, goals_appointments: 100, service_ids: ["service-5", "service-6"], off_days: [0, 2], created_at: new Date().toISOString() },
+];
 
 const TIME_SLOTS = [
   "09:00",
@@ -37,13 +53,16 @@ const TIME_SLOTS = [
   "15:00",
   "16:00",
   "17:00",
-  "18:00",
 ];
 
 export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [bookedIntervals, setBookedIntervals] = useState<BookedInterval[]>([]);
+  const [bookingError, setBookingError] = useState("");
+  const [initialLoadError, setInitialLoadError] = useState("");
 
   // Dados do banco
   const [services, setServices] = useState<Service[]>([]);
@@ -62,6 +81,9 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
   const [pointsFound, setPointsFound] = useState<number | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [welcomeName, setWelcomeName] = useState<string | null>(null);
+  const eligibleProfessionals = selectedService
+    ? professionals.filter(professional => !Array.isArray(professional.service_ids) || professional.service_ids.includes(selectedService.id))
+    : [];
 
   // Formata o telefone em tempo real: (XX) XXXXX-XXXX
   const formatPhone = (val: string) => {
@@ -84,6 +106,12 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
       const lookup = async () => {
         setSearchLoading(true);
         try {
+          if (isPreview) {
+            setPointsFound(72);
+            setWelcomeName("Ana");
+            setCustomerInfo(prev => ({ ...prev, name: prev.name || "Ana Souza" }));
+            return;
+          }
           const customer = await getCustomerByPhone(cleanPhone);
           if (customer) {
             setPointsFound(customer.loyalty_points);
@@ -92,8 +120,6 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
             setCustomerInfo(prev => ({
               ...prev,
               name: prev.name || customer.name,
-              email: prev.email || customer.email || "",
-              birthday: prev.birthday || customer.birthday || "",
             }));
           } else {
             setPointsFound(null);
@@ -118,14 +144,24 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
       const fetchInitialData = async () => {
         try {
           setLoading(true);
-          const [servicesData, profsData] = await Promise.all([
-            getActiveServices(),
-            getProfessionals(),
+          setInitialLoadError("");
+          if (isPreview) {
+            setServices(previewServices);
+            setProfessionals(previewProfessionals);
+            return;
+          }
+          const timeout = new Promise<never>((_, reject) => {
+            window.setTimeout(() => reject(new Error("INITIAL_LOAD_TIMEOUT")), 10000);
+          });
+          const [servicesData, profsData] = await Promise.race([
+            Promise.all([getActiveServices(), getBookingProfessionals()]),
+            timeout,
           ]);
           setServices(servicesData);
           setProfessionals(profsData);
         } catch (error) {
           console.error("Erro ao carregar dados:", error);
+          setInitialLoadError("Não foi possível carregar a agenda agora. Feche esta janela e tente novamente.");
         } finally {
           setLoading(false);
         }
@@ -137,9 +173,61 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
       setSelectedService(null);
       setSelectedProf(null);
       setSelectedTime("");
-      setCustomerInfo({ name: "", phone: "", email: "" });
+      setBookingError("");
+      setInitialLoadError("");
+      setBookedIntervals([]);
+      setCustomerInfo({ name: "", phone: "", email: "", birthday: "" });
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !selectedProf || !selectedService) {
+      setBookedIntervals([]);
+      return;
+    }
+
+    let cancelled = false;
+    setAvailabilityLoading(true);
+    setBookingError("");
+
+    if (isPreview) {
+      const occupiedStart = new Date(selectedDate);
+      occupiedStart.setHours(14, 0, 0, 0);
+      setBookedIntervals([{ start_time: occupiedStart.toISOString(), end_time: new Date(occupiedStart.getTime() + 60 * 60000).toISOString() }]);
+      setAvailabilityLoading(false);
+      return;
+    }
+
+    getPublicBookedIntervals(selectedProf.id, format(selectedDate, "yyyy-MM-dd"))
+      .then((intervals) => {
+        if (!cancelled) setBookedIntervals(intervals);
+      })
+      .catch(() => {
+        if (!cancelled) setBookingError("Não foi possível carregar os horários. Tente novamente.");
+      })
+      .finally(() => {
+        if (!cancelled) setAvailabilityLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, selectedProf, selectedService, selectedDate]);
+
+  const isTimeUnavailable = (time: string) => {
+    if (!selectedService) return true;
+    const [hours, minutes] = time.split(":").map(Number);
+    const slotStart = new Date(selectedDate);
+    slotStart.setHours(hours, minutes, 0, 0);
+    const slotEnd = new Date(slotStart.getTime() + selectedService.duration_minutes * 60000);
+    const closingTime = new Date(selectedDate);
+    closingTime.setHours(18, 0, 0, 0);
+
+    if (slotEnd > closingTime) return true;
+    return bookedIntervals.some((interval) => (
+      slotStart < new Date(interval.end_time) && slotEnd > new Date(interval.start_time)
+    ));
+  };
 
   const handleBooking = async () => {
     if (
@@ -152,35 +240,51 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
       return;
 
     setIsSubmitting(true);
+    setBookingError("");
     try {
+      if (isPreview) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        setStep(5);
+        return;
+      }
       // Combina a data selecionada com a hora
       const [hours, minutes] = selectedTime.split(":").map(Number);
       const startTime = new Date(selectedDate);
       startTime.setHours(hours, minutes, 0, 0);
 
       // Calcula o tempo de fim baseado na duração do serviço (ou 60min por defeito)
-      const duration = selectedService.duration_minutes || 60;
-      const endTime = new Date(startTime.getTime() + duration * 60000);
-
-      await createAppointment({
+      await createPublicAppointment({
         customer_name: customerInfo.name,
         customer_phone: customerInfo.phone,       // NOVO
         customer_email: customerInfo.email,       // NOVO
         customer_birthday: customerInfo.birthday, // NOVO
         professional_id: selectedProf.id,
         service_id: selectedService.id,
-        service_name: selectedService.name,
-        price: selectedService.price,
         start_time: startTime.toISOString(),
-        end_time: endTime.toISOString(),
-        status: "scheduled",
-        is_blocked: false,
       });
 
       setStep(5); // Ecrã de Sucesso
     } catch (error) {
       console.error("Erro ao agendar:", error);
-      alert("Houve um erro ao processar o seu agendamento. Tente novamente.");
+      const message = error instanceof Error ? error.message : "";
+      if (message.includes("TIME_SLOT_UNAVAILABLE")) {
+        setBookingError("Esse horário acabou de ser ocupado. Escolha outra opção.");
+        setSelectedTime("");
+        setStep(3);
+        if (selectedProf) {
+          try {
+            const intervals = await getPublicBookedIntervals(selectedProf.id, format(selectedDate, "yyyy-MM-dd"));
+            setBookedIntervals(intervals);
+          } catch {
+            setBookedIntervals([]);
+          }
+        }
+      } else if (message.includes("OUTSIDE_BUSINESS_HOURS")) {
+        setBookingError("O horário escolhido está fora do funcionamento do salão.");
+        setStep(3);
+      } else {
+        setBookingError("Não foi possível concluir o agendamento. Tente novamente.");
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -202,10 +306,10 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
         initial={{ opacity: 0, y: 100, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 100, scale: 0.95 }}
-        className="w-full max-w-4xl bg-aura-cream rounded-3xl shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[90vh]"
+        className="w-full max-w-4xl bg-aura-cream rounded-[2rem] shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[92vh] border border-white/60"
       >
         {/* Header do Modal */}
-        <div className="h-20 border-b border-aura-charcoal/5 flex items-center justify-between px-8 bg-white/50 backdrop-blur-sm shrink-0">
+        <div className="min-h-20 border-b border-aura-charcoal/5 flex items-center justify-between gap-4 px-5 py-4 sm:px-8 bg-white/60 backdrop-blur-sm shrink-0">
           <div className="flex items-center gap-4">
             {step > 1 && step < 5 && (
               <button
@@ -215,10 +319,16 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
                 <ChevronLeft className="w-5 h-5" />
               </button>
             )}
-            <h3 className="text-xl font-serif italic text-aura-charcoal">
-              Agendar Horário
-            </h3>
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-aura-gold">Studio Modesto</p>
+              <h3 className="text-xl font-serif text-aura-charcoal">Agendar horário</h3>
+            </div>
           </div>
+          {step < 5 && (
+            <div className="hidden items-center gap-1 sm:flex" aria-label={`Etapa ${step} de 4`}>
+              {[1, 2, 3, 4].map(item => <span key={item} className={cn("h-1.5 rounded-full transition-all", item === step ? "w-8 bg-aura-gold" : item < step ? "w-4 bg-aura-gold/45" : "w-4 bg-aura-charcoal/10")} />)}
+            </div>
+          )}
           <button
             onClick={onClose}
             className="p-2 rounded-full hover:bg-aura-charcoal/5 text-aura-charcoal/40 hover:text-aura-charcoal transition-colors"
@@ -228,7 +338,19 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
         </div>
 
         {/* Corpo do Modal */}
-        <div className="p-8 overflow-y-auto flex-1">
+        <div className="p-5 sm:p-8 overflow-y-auto flex-1">
+          {bookingError && (
+            <p role="alert" className="mb-5 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">
+              {bookingError}
+            </p>
+          )}
+          {initialLoadError && !loading && (
+            <div role="alert" className="flex min-h-64 flex-col items-center justify-center rounded-3xl border border-red-100 bg-red-50/60 p-8 text-center">
+              <p className="font-serif text-xl text-aura-charcoal">A agenda demorou para responder.</p>
+              <p className="mt-2 max-w-sm text-sm leading-relaxed text-aura-charcoal/55">{initialLoadError}</p>
+              <button type="button" onClick={onClose} className="aura-button aura-button-primary mt-6">Fechar e tentar novamente</button>
+            </div>
+          )}
           {loading ? (
             <div className="flex flex-col items-center justify-center h-64 space-y-4">
               <Loader2 className="w-10 h-10 animate-spin text-aura-gold" />
@@ -236,7 +358,7 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
                 A preparar o salão...
               </p>
             </div>
-          ) : (
+          ) : !initialLoadError ? (
             <AnimatePresence mode="wait">
               {/* PASSO 1: SERVIÇO */}
               {step === 1 && (
@@ -256,6 +378,7 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
                         key={service.id}
                         onClick={() => {
                           setSelectedService(service);
+                          setSelectedProf(null);
                           setStep(2);
                         }}
                         className={cn(
@@ -313,7 +436,8 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
                     {/* Opção Qualquer Profissional (Pega o primeiro da lista) */}
                     <button
                       onClick={() => {
-                        const prof = professionals[0];
+                        const prof = eligibleProfessionals[0];
+                        if (!prof) return;
                         setSelectedProf(prof);
                         // Se a data atual for folga do profissional, avança para o próximo dia ativo
                         let checkDate = startOfDay(addDays(new Date(), 1));
@@ -338,7 +462,7 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
                       </div>
                     </button>
 
-                    {professionals.map((prof) => (
+                    {eligibleProfessionals.map((prof) => (
                       <button
                         key={prof.id}
                         onClick={() => {
@@ -378,6 +502,11 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
                         </div>
                       </button>
                     ))}
+                    {eligibleProfessionals.length === 0 && (
+                      <div className="col-span-full rounded-2xl border border-dashed border-aura-charcoal/15 bg-white/50 p-6 text-center text-sm text-aura-charcoal/50">
+                        Nenhuma profissional está vinculada a este serviço no momento.
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -404,12 +533,16 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
                       <div className="grid grid-cols-3 gap-2">
                         {Array.from({ length: 6 }).map((_, i) => {
                           const date = addDays(new Date(), i + 1);
-                          const isOffDay = selectedProf?.off_days?.includes(date.getDay());
+                          const isOffDay = date.getDay() === 0 || selectedProf?.off_days?.includes(date.getDay());
                           return (
                             <button
                               key={i}
                               disabled={isOffDay}
-                              onClick={() => setSelectedDate(startOfDay(date))}
+                              onClick={() => {
+                                setSelectedDate(startOfDay(date));
+                                setSelectedTime("");
+                                setBookingError("");
+                              }}
                               className={cn(
                                 "p-3 rounded-xl border text-center transition-all relative overflow-hidden",
                                 isOffDay
@@ -439,21 +572,36 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
                         <Clock className="w-4 h-4" /> Horários
                       </p>
                       <div className="grid grid-cols-3 gap-2">
-                        {TIME_SLOTS.map((time) => (
-                          <button
-                            key={time}
-                            onClick={() => setSelectedTime(time)}
-                            className={cn(
-                              "py-3 px-2 rounded-xl border text-sm font-medium transition-all",
-                              selectedTime === time
-                                ? "bg-aura-gold text-white border-aura-gold shadow-md"
-                                : "bg-white border-aura-charcoal/5 hover:border-aura-gold/30",
-                            )}
-                          >
-                            {time}
-                          </button>
-                        ))}
+                        {TIME_SLOTS.map((time) => {
+                          const unavailable = availabilityLoading || isTimeUnavailable(time);
+                          return (
+                            <button
+                              key={time}
+                              disabled={unavailable}
+                              aria-label={unavailable ? `${time}, indisponível` : `${time}, disponível`}
+                              onClick={() => {
+                                setSelectedTime(time);
+                                setBookingError("");
+                              }}
+                              className={cn(
+                                "py-3 px-2 rounded-xl border text-sm font-medium transition-all",
+                                unavailable
+                                  ? "bg-aura-charcoal/5 border-aura-charcoal/5 text-aura-charcoal/25 line-through cursor-not-allowed"
+                                  : selectedTime === time
+                                  ? "bg-aura-gold text-white border-aura-gold shadow-md"
+                                  : "bg-white border-aura-charcoal/5 hover:border-aura-gold/30",
+                              )}
+                            >
+                              {time}
+                            </button>
+                          );
+                        })}
                       </div>
+                      {availabilityLoading && (
+                        <p className="text-[10px] text-aura-charcoal/45 flex items-center gap-2">
+                          <Loader2 className="w-3 h-3 animate-spin" /> Atualizando disponibilidade...
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -588,7 +736,7 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
                       <div className="space-y-1">
                         <label className="text-[10px] uppercase tracking-widest text-aura-charcoal/40">Data de Aniversário</label>
                         <input 
-                          placeholder="DD/MM/AAAA"
+                          type="date"
                           className="w-full bg-white border border-aura-charcoal/5 rounded-xl px-4 py-3 outline-none focus:border-aura-gold/50 transition-colors"
                           value={customerInfo.birthday}
                           onChange={e => setCustomerInfo({...customerInfo, birthday: e.target.value})}
@@ -646,7 +794,7 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
                 </motion.div>
               )}
             </AnimatePresence>
-          )}
+          ) : null}
         </div>
       </motion.div>
     </div>

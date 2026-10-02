@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  getTransactions, getFinanceDashboard, createTransaction, updateTransactionStatus, 
+  getTransactions, calculateFinanceDashboard, createTransaction, updateTransactionStatus,
   getPendingCommissions, payCommission, Transaction, FinanceDashboard, PendingCommission 
 } from '../services/api/finance';
 import { cn } from '../utils/cn';
@@ -13,6 +13,15 @@ import { format, startOfMonth, endOfMonth, addMonths, subMonths, parseISO } from
 import { ptBR } from 'date-fns/locale';
 
 type DrawerType = 'transaction' | 'commissions' | 'incomeDetails' | 'expenseDetails' | 'pendingDetails' | null;
+const isPreview = import.meta.env.DEV && import.meta.env.VITE_ADMIN_PREVIEW === 'true';
+
+const previewTransactions: Transaction[] = [
+  { id: 'tx-1', description: 'Atendimentos do dia', amount: 680, type: 'income', category: 'Serviços', payment_method: 'PIX', status: 'pago', date: new Date().toISOString() },
+  { id: 'tx-2', description: 'Venda de finalizadores', amount: 156, type: 'income', category: 'Revenda', payment_method: 'Cartão de Crédito', status: 'pago', date: new Date(Date.now() - 86400000).toISOString() },
+  { id: 'tx-3', description: 'Reposição de produtos', amount: 248.5, type: 'expense', category: 'Fornecedores / Estoque', payment_method: 'PIX', status: 'pago', date: new Date(Date.now() - 172800000).toISOString() },
+  { id: 'tx-4', description: 'Pacote mensal de cliente', amount: 320, type: 'income', category: 'Serviços', payment_method: 'PIX', status: 'pendente', date: new Date(Date.now() - 259200000).toISOString() },
+  { id: 'tx-5', description: 'Conta de energia', amount: 189.9, type: 'expense', category: 'Custos Fixos', payment_method: 'Débito', status: 'atrasado', date: new Date(Date.now() - 345600000).toISOString() },
+];
 
 // --- DRAWER COMPONENT ---
 function Drawer({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode; }) {
@@ -27,7 +36,7 @@ function Drawer({ open, onClose, title, children }: { open: boolean; onClose: ()
       {open && (
         <>
           <motion.div key="backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40" onClick={onClose} />
-          <motion.div key="drawer" initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 28, stiffness: 260 }} className="fixed right-0 top-0 h-full w-full max-w-md bg-aura-cream shadow-2xl z-50 flex flex-col border-l border-aura-charcoal/5">
+          <motion.div key="drawer" initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 28, stiffness: 260 }} className="fixed right-0 top-0 h-full w-full max-w-xl bg-aura-cream shadow-2xl z-50 flex flex-col border-l border-aura-charcoal/10">
             <div className="flex items-center justify-between px-6 py-5 border-b border-aura-charcoal/5 bg-white/50 backdrop-blur-md">
               <h2 className="font-serif text-xl italic">{title}</h2>
               <button onClick={onClose} className="p-2 rounded-full hover:bg-aura-soft-gray transition-colors text-aura-charcoal/40 hover:text-aura-charcoal">
@@ -54,7 +63,7 @@ export function Finance() {
   });
 
   // Data States
-  const [dashboard, setDashboard] = useState<FinanceDashboard>({ grossRevenue: 0, expenses: 0, netProfit: 0, pendingBalance: 0 });
+  const [dashboard, setDashboard] = useState<FinanceDashboard>({ grossRevenue: 0, expenses: 0, netProfit: 0, pendingBalance: 0, pendingIncome: 0, pendingExpenses: 0 });
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
@@ -84,11 +93,14 @@ export function Finance() {
         end = parseISO(customRange.end);
       }
 
-      const [dashData, txData] = await Promise.all([
-        getFinanceDashboard(start, end),
-        getTransactions(start, end)
-      ]);
-      setDashboard(dashData);
+      if (isPreview) {
+        setTransactions(previewTransactions);
+        setDashboard(calculateFinanceDashboard(previewTransactions));
+        return;
+      }
+
+      const txData = await getTransactions(start, end);
+      setDashboard(calculateFinanceDashboard(txData));
       setTransactions(txData);
     } catch (error) { console.error(error); } finally { setLoading(false); }
   };
@@ -96,6 +108,13 @@ export function Finance() {
   const handleOpenCommissions = async () => {
     setDrawerType('commissions');
     try {
+      if (isPreview) {
+        setPendingCommissions([
+          { professional_id: 'prof-1', professional_name: 'Carla Santos', pending_amount: 284, appointment_ids: ['appt-1', 'appt-2', 'appt-3'] },
+          { professional_id: 'prof-2', professional_name: 'Jéssica Lima', pending_amount: 176.5, appointment_ids: ['appt-4', 'appt-5'] },
+        ]);
+        return;
+      }
       const data = await getPendingCommissions();
       setPendingCommissions(data);
     } catch (error) { console.error(error); }
@@ -106,9 +125,18 @@ export function Finance() {
     if (!newTx.description || !newTx.amount) return;
     setIsSaving(true);
     try {
-      const dateStr = new Date(newTx.date!).toISOString();
-      await createTransaction({ ...newTx, date: dateStr });
-      await fetchData();
+      const dateStr = new Date(`${newTx.date}T12:00:00`).toISOString();
+      if (isPreview) {
+        const created = { ...newTx, id: `tx-${Date.now()}`, date: dateStr } as Transaction;
+        setTransactions(prev => {
+          const next = [created, ...prev];
+          setDashboard(calculateFinanceDashboard(next));
+          return next;
+        });
+      } else {
+        await createTransaction({ ...newTx, date: dateStr });
+        await fetchData();
+      }
       setDrawerType(null);
       setNewTx({ type: 'income', category: 'Serviços', payment_method: 'PIX', status: 'pago', amount: 0, description: '', date: format(new Date(), 'yyyy-MM-dd') });
     } catch (error: any) {
@@ -120,9 +148,9 @@ export function Finance() {
     if (!confirm(`Confirmar o pagamento de R$ ${comm.pending_amount.toFixed(2)} para ${comm.professional_name}?`)) return;
     setIsSaving(true);
     try {
-      await payCommission(comm.professional_id, comm.professional_name, comm.pending_amount, comm.appointment_ids);
+      if (!isPreview) await payCommission(comm.professional_id, comm.professional_name, comm.pending_amount, comm.appointment_ids);
       setPendingCommissions(prev => prev.filter(c => c.professional_id !== comm.professional_id));
-      await fetchData();
+      if (!isPreview) await fetchData();
     } catch (error: any) {
       alert("Erro ao pagar comissão: " + error.message);
     } finally { setIsSaving(false); }
@@ -131,8 +159,16 @@ export function Finance() {
   const toggleTxStatus = async (tx: Transaction) => {
     if (tx.status === 'pago') return;
     try {
-      await updateTransactionStatus(tx.id, 'pago');
-      await fetchData();
+      if (isPreview) {
+        setTransactions(prev => {
+          const next = prev.map(item => item.id === tx.id ? { ...item, status: 'pago' as const } : item);
+          setDashboard(calculateFinanceDashboard(next));
+          return next;
+        });
+      } else {
+        await updateTransactionStatus(tx.id, 'pago');
+        await fetchData();
+      }
     } catch (error) { console.error("Erro ao atualizar status"); }
   };
 
@@ -149,16 +185,18 @@ export function Finance() {
     <div className="space-y-6">
       
       {/* HEADER & CONTROLS DE PERÍODO */}
-      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 bg-white/40 p-6 rounded-3xl border border-aura-charcoal/5 shadow-sm">
-        <div className="space-y-1">
-          <h3 className="text-2xl font-serif italic text-aura-charcoal">Gestão Financeira</h3>
-          <p className="text-sm text-aura-charcoal/40 uppercase tracking-widest font-bold">
-            {filterMode === 'month' ? `DRE de ${format(currentMonthDate, 'MMMM yyyy', { locale: ptBR })}` : 'DRE de Período Personalizado'}
+      <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-6 bg-aura-charcoal p-6 sm:p-8 rounded-3xl border border-aura-charcoal/5 shadow-xl text-white overflow-hidden relative">
+        <div className="absolute -right-20 -top-24 h-64 w-64 rounded-full bg-aura-gold/20 blur-3xl" />
+        <div className="space-y-1 relative z-10">
+          <p className="admin-kicker text-aura-gold">Decisões com clareza</p>
+          <h3 className="text-3xl sm:text-4xl font-serif text-white">Gestão financeira.</h3>
+          <p className="text-xs text-white/45 uppercase tracking-widest font-bold pt-2">
+            {filterMode === 'month' ? `de ${format(currentMonthDate, 'MMMM yyyy', { locale: ptBR })}` : 'DRE de Período Personalizado'}
           </p>
         </div>
 
         {/* Controladores de Data */}
-        <div className="flex flex-col sm:flex-row items-center gap-4 bg-white p-2 rounded-2xl border border-aura-charcoal/10 shadow-sm w-full xl:w-auto">
+        <div className="flex flex-col sm:flex-row items-center gap-4 bg-white p-2 rounded-2xl border border-white/10 shadow-sm w-full xl:w-auto relative z-10">
           <div className="flex gap-1 w-full sm:w-auto p-1 bg-aura-soft-gray rounded-xl">
             <button onClick={() => setFilterMode('month')} className={cn("flex-1 sm:flex-none px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all", filterMode === 'month' ? "bg-white shadow-sm text-aura-charcoal" : "text-aura-charcoal/40")}>Mensal</button>
             <button onClick={() => setFilterMode('custom')} className={cn("flex-1 sm:flex-none px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all", filterMode === 'custom' ? "bg-white shadow-sm text-aura-charcoal" : "text-aura-charcoal/40")}>Específico</button>
@@ -168,11 +206,15 @@ export function Finance() {
 
           {filterMode === 'month' ? (
             <div className="flex items-center gap-3 w-full sm:w-auto justify-between px-2">
-              <button onClick={() => setCurrentMonthDate(subMonths(currentMonthDate, 1))} className="p-1.5 hover:bg-aura-soft-gray rounded-lg transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+              <button type="button" aria-label="Mês anterior" onClick={() => setCurrentMonthDate(subMonths(currentMonthDate, 1))} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-aura-soft-gray text-aura-charcoal transition-colors hover:bg-aura-gold hover:text-white">
+                <ChevronLeft className="h-5 w-5 stroke-[2.5]" />
+              </button>
               <span className="text-sm font-bold text-aura-charcoal uppercase tracking-widest min-w-[120px] text-center">
                 {format(currentMonthDate, 'MMM yyyy', { locale: ptBR })}
               </span>
-              <button onClick={() => setCurrentMonthDate(addMonths(currentMonthDate, 1))} className="p-1.5 hover:bg-aura-soft-gray rounded-lg transition-colors"><ChevronRight className="w-4 h-4" /></button>
+              <button type="button" aria-label="Próximo mês" onClick={() => setCurrentMonthDate(addMonths(currentMonthDate, 1))} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-aura-soft-gray text-aura-charcoal transition-colors hover:bg-aura-gold hover:text-white">
+                <ChevronRight className="h-5 w-5 stroke-[2.5]" />
+              </button>
             </div>
           ) : (
             <div className="flex items-center gap-2 w-full sm:w-auto px-2">
@@ -183,22 +225,22 @@ export function Finance() {
           )}
         </div>
 
-        <div className="flex gap-3 w-full xl:w-auto">
-          <button onClick={handleOpenCommissions} className="flex-1 xl:flex-none aura-button aura-button-secondary flex items-center justify-center gap-2 whitespace-nowrap bg-white">
-            <Users className="w-4 h-4 text-aura-gold" /> Comissões
+        <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto relative z-10">
+          <button type="button" onClick={handleOpenCommissions} className="aura-button flex flex-1 items-center justify-center gap-2 whitespace-nowrap border border-white bg-white text-aura-charcoal shadow-md hover:bg-[#fff4f7] xl:flex-none">
+            <Users className="h-4 w-4 shrink-0 text-aura-gold" /> <span className="text-aura-charcoal">Comissões</span>
           </button>
-          <button onClick={() => setDrawerType('transaction')} className="flex-1 xl:flex-none aura-button aura-button-primary flex items-center justify-center gap-2 whitespace-nowrap shadow-lg shadow-aura-charcoal/10">
-            <Plus className="w-4 h-4" /> Lançamento
+          <button type="button" onClick={() => setDrawerType('transaction')} className="aura-button flex flex-1 items-center justify-center gap-2 whitespace-nowrap border border-aura-clay bg-aura-clay text-aura-charcoal shadow-lg shadow-black/15 hover:bg-[#efa7ba] xl:flex-none">
+            <Plus className="h-4 w-4 shrink-0" /> <span className="text-aura-charcoal">Lançamento</span>
           </button>
         </div>
       </div>
 
       {/* DASHBOARD CARDS (AGORA CLICÁVEIS) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-6">
         <motion.div 
           whileHover={{ scale: 1.02 }}
           onClick={() => setDrawerType('incomeDetails')}
-          className="glass-card p-6 border-t-4 border-green-500 cursor-pointer hover:shadow-lg transition-all group"
+          className="glass-card min-h-48 p-6 border-t-4 border-green-500 cursor-pointer hover:shadow-lg transition-all group"
         >
           <div className="flex justify-between items-start mb-4">
             <div className="p-3 rounded-2xl bg-green-50 text-green-600 group-hover:scale-110 transition-transform"><TrendingUp className="w-5 h-5" /></div>
@@ -211,7 +253,7 @@ export function Finance() {
         <motion.div 
           whileHover={{ scale: 1.02 }}
           onClick={() => setDrawerType('expenseDetails')}
-          className="glass-card p-6 border-t-4 border-red-500 cursor-pointer hover:shadow-lg transition-all group"
+          className="glass-card min-h-48 p-6 border-t-4 border-red-500 cursor-pointer hover:shadow-lg transition-all group"
         >
           <div className="flex justify-between items-start mb-4">
             <div className="p-3 rounded-2xl bg-red-50 text-red-600 group-hover:scale-110 transition-transform"><TrendingDown className="w-5 h-5" /></div>
@@ -222,7 +264,7 @@ export function Finance() {
         </motion.div>
 
         {/* Lucro Líquido não precisa de Drill-down, é a diferença matemática */}
-        <div className="glass-card p-6 border-t-4 border-aura-gold bg-aura-charcoal text-white shadow-xl relative overflow-hidden">
+        <div className="glass-card min-h-48 p-6 border-t-4 border-aura-gold bg-aura-charcoal text-white shadow-xl relative overflow-hidden">
           <div className="absolute -right-6 -top-6 w-24 h-24 bg-aura-gold/10 rounded-full blur-2xl"></div>
           <div className="flex justify-between items-start mb-4 relative z-10">
             <div className="p-3 rounded-2xl bg-white/10 text-aura-gold"><DollarSign className="w-5 h-5" /></div>
@@ -235,19 +277,22 @@ export function Finance() {
         <motion.div 
           whileHover={{ scale: 1.02 }}
           onClick={() => setDrawerType('pendingDetails')}
-          className="glass-card p-6 border-t-4 border-orange-400 cursor-pointer hover:shadow-lg transition-all group"
+          className="glass-card min-h-48 p-6 border-t-4 border-orange-400 cursor-pointer hover:shadow-lg transition-all group"
         >
           <div className="flex justify-between items-start mb-4">
             <div className="p-3 rounded-2xl bg-orange-50 text-orange-500 group-hover:scale-110 transition-transform"><Clock className="w-5 h-5" /></div>
           </div>
           <p className="text-[10px] text-aura-charcoal/40 uppercase tracking-widest font-bold">Balanço Pendente</p>
           <p className="text-2xl font-serif text-aura-charcoal">R$ {dashboard.pendingBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+          <p className="mt-2 text-[10px] text-aura-charcoal/50">
+            A receber R$ {dashboard.pendingIncome.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} · A pagar R$ {dashboard.pendingExpenses.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+          </p>
           <p className="text-[9px] text-orange-500 font-bold uppercase tracking-widest mt-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">Ver Pendências <ArrowRight className="w-3 h-3"/></p>
         </motion.div>
       </div>
 
       {/* TRANSACTIONS LIST */}
-      <div className="glass-card p-8 border border-aura-charcoal/5">
+      <div className="glass-card p-5 sm:p-8 border border-aura-charcoal/5">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
           <h3 className="text-lg font-serif italic text-aura-charcoal flex items-center gap-2">
             <Wallet className="w-5 h-5 text-aura-gold" /> Fluxo de Caixa no Período
@@ -271,7 +316,7 @@ export function Finance() {
                   </div>
                   <div>
                     <p className="font-bold text-aura-charcoal text-sm">{tx.description}</p>
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
                       <span className="text-[9px] uppercase tracking-widest font-bold text-aura-charcoal/40 bg-aura-soft-gray px-2 py-0.5 rounded">{tx.category}</span>
                       <span className="text-[9px] uppercase tracking-widest font-bold text-aura-charcoal/40 flex items-center gap-1"><CreditCard className="w-3 h-3"/> {tx.payment_method}</span>
                       <span className="text-[9px] uppercase tracking-widest font-bold text-aura-charcoal/40 ml-2">{format(new Date(tx.date), "dd/MM/yyyy")}</span>
@@ -322,10 +367,10 @@ export function Finance() {
         {drawerType === 'transaction' && (
           <form onSubmit={handleCreateTransaction} className="space-y-6">
             <div className="flex gap-2 p-1 bg-aura-soft-gray rounded-xl">
-              <button type="button" onClick={() => setNewTx({...newTx, type: 'income'})} className={cn("flex-1 py-3 rounded-lg text-xs font-bold uppercase tracking-widest transition-all flex justify-center items-center gap-2", newTx.type === 'income' ? "bg-green-500 text-white shadow-sm" : "text-aura-charcoal/40")}>
+              <button type="button" onClick={() => setNewTx({...newTx, type: 'income', category: 'Serviços'})} className={cn("flex-1 py-3 rounded-lg text-xs font-bold uppercase tracking-widest transition-all flex justify-center items-center gap-2", newTx.type === 'income' ? "bg-green-500 text-white shadow-sm" : "text-aura-charcoal/40")}>
                 <TrendingUp className="w-4 h-4"/> Entrada
               </button>
-              <button type="button" onClick={() => setNewTx({...newTx, type: 'expense'})} className={cn("flex-1 py-3 rounded-lg text-xs font-bold uppercase tracking-widest transition-all flex justify-center items-center gap-2", newTx.type === 'expense' ? "bg-red-500 text-white shadow-sm" : "text-aura-charcoal/40")}>
+              <button type="button" onClick={() => setNewTx({...newTx, type: 'expense', category: 'Custos Fixos (Luz, Aluguel)'})} className={cn("flex-1 py-3 rounded-lg text-xs font-bold uppercase tracking-widest transition-all flex justify-center items-center gap-2", newTx.type === 'expense' ? "bg-red-500 text-white shadow-sm" : "text-aura-charcoal/40")}>
                 <TrendingDown className="w-4 h-4"/> Saída
               </button>
             </div>
@@ -336,7 +381,7 @@ export function Finance() {
                 <input required className="w-full bg-white border border-aura-charcoal/10 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 ring-aura-gold/20" value={newTx.description} onChange={e => setNewTx({...newTx, description: e.target.value})} placeholder={newTx.type === 'income' ? "Ex: Venda de Shampoo" : "Ex: Conta de Luz"} />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] uppercase tracking-widest text-aura-charcoal/40 font-bold">Valor (R$)</label>
                   <input type="number" step="0.01" required className="w-full bg-white border border-aura-charcoal/10 rounded-xl px-4 py-3 text-lg font-bold outline-none" value={newTx.amount} onChange={e => setNewTx({...newTx, amount: Number(e.target.value)})} />
@@ -347,7 +392,7 @@ export function Finance() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] uppercase tracking-widest text-aura-charcoal/40 font-bold">Categoria</label>
                   <select className="w-full bg-white border border-aura-charcoal/10 rounded-xl px-4 py-3 text-sm outline-none" value={newTx.category} onChange={e => setNewTx({...newTx, category: e.target.value})}>

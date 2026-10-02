@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { getProfessionals, updateProfessional, createProfessional, getProfessionalDashboard, ProfessionalData, ProfDashboardStats } from '../services/api/professionals';
+import { getProfessionals, updateProfessional, createProfessional, getProfessionalDashboard, setProfessionalServices, ProfessionalData, ProfDashboardStats } from '../services/api/professionals';
+import { getActiveServices } from '../services/api/services';
+import { Service } from '../types';
 import { cn } from '../utils/cn';
 import { 
   Users, Search, Plus, Loader2, X, Scissors, Edit3, Save, 
@@ -22,7 +24,7 @@ function Drawer({ open, onClose, title, children }: { open: boolean; onClose: ()
       {open && (
         <>
           <motion.div key="backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40" onClick={onClose} />
-          <motion.div key="drawer" initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 28, stiffness: 260 }} className="fixed right-0 top-0 h-full w-full max-w-md bg-aura-cream shadow-2xl z-50 flex flex-col border-l border-aura-charcoal/5">
+          <motion.div key="drawer" initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 28, stiffness: 260 }} className="fixed right-0 top-0 h-full w-full max-w-xl bg-aura-cream shadow-2xl z-50 flex flex-col border-l border-aura-charcoal/10">
             <div className="flex items-center justify-between px-6 py-5 border-b border-aura-charcoal/5 bg-white/50 backdrop-blur-md">
               <h2 className="font-serif text-xl italic">{title}</h2>
               <button onClick={onClose} className="p-2 rounded-full hover:bg-aura-soft-gray transition-colors text-aura-charcoal/40 hover:text-aura-charcoal">
@@ -41,6 +43,7 @@ function Drawer({ open, onClose, title, children }: { open: boolean; onClose: ()
 
 export function Professionals() {
   const [professionals, setProfessionals] = useState<ProfessionalData[]>([]);
+  const [serviceOptions, setServiceOptions] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   
@@ -59,10 +62,27 @@ export function Professionals() {
   useEffect(() => { fetchTeam(); }, []);
 
   const fetchTeam = async () => {
+    if (import.meta.env.DEV && import.meta.env.VITE_ADMIN_PREVIEW === 'true') {
+      const createdAt = new Date().toISOString();
+      setProfessionals([
+        { id: 'preview-ana', name: 'Ana Modesto', role: 'Cabeleireira', active: true, commission_rate: 35, goals_monthly_revenue: 8000, goals_appointments: 60, specialties: ['Corte', 'Coloração', 'Escova'], service_ids: ['preview-cut'], off_days: [0], created_at: createdAt },
+        { id: 'preview-julia', name: 'Júlia Santos', role: 'Manicure', active: true, commission_rate: 30, goals_monthly_revenue: 5000, goals_appointments: 70, specialties: ['Manicure', 'Pedicure', 'Spa dos pés'], service_ids: ['preview-nails'], off_days: [1], created_at: createdAt },
+        { id: 'preview-carol', name: 'Carolina Lima', role: 'Esteticista', active: true, commission_rate: 35, goals_monthly_revenue: 6000, goals_appointments: 45, specialties: ['Limpeza de pele', 'Hidratação facial'], off_days: [0, 2], created_at: createdAt },
+        { id: 'preview-bia', name: 'Beatriz Rocha', role: 'Cabeleireira', active: false, commission_rate: 30, goals_monthly_revenue: 0, goals_appointments: 0, specialties: ['Tranças', 'Penteados'], off_days: [0], created_at: createdAt },
+      ]);
+      setServiceOptions([
+        { id: 'preview-cut', name: 'Corte e escova', price: 120, duration_minutes: 90, category: 'Cabelo', active: true },
+        { id: 'preview-nails', name: 'Manicure', price: 55, duration_minutes: 60, category: 'Mãos e pés', active: true },
+        { id: 'preview-care', name: 'Tratamento facial', price: 150, duration_minutes: 60, category: 'Pele', active: true },
+      ]);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
-      const data = await getProfessionals(true); // Puxa todos, ativos e inativos
+      const [data, activeServices] = await Promise.all([getProfessionals(true), getActiveServices()]);
       setProfessionals(data);
+      setServiceOptions(activeServices);
     } catch (error) { console.error(error); } finally { setLoading(false); }
   };
 
@@ -76,6 +96,21 @@ export function Professionals() {
     setSpecialtiesInput(prof.specialties?.join(', ') || '');
     setDashboardData(null);
     setLoadingDash(true);
+
+    if (import.meta.env.DEV && import.meta.env.VITE_ADMIN_PREVIEW === 'true') {
+      const startsAt = new Date();
+      startsAt.setDate(startsAt.getDate() + 1);
+      startsAt.setHours(10, 0, 0, 0);
+      setDashboardData({
+        totalRevenue: prof.active ? 4860 : 0,
+        totalAttendances: prof.active ? 34 : 0,
+        averageTicket: prof.active ? 142.94 : 0,
+        pendingCommission: prof.active ? 486 : 0,
+        upcoming: prof.active ? [{ id: 'preview-next', professional_id: prof.id, customer_name: 'Mariana Souza', service_name: prof.specialties[0] || 'Atendimento', price: 120, start_time: startsAt.toISOString(), end_time: new Date(startsAt.getTime() + 36e5).toISOString(), status: 'confirmed', is_blocked: false, created_at: new Date().toISOString() }] : [],
+      });
+      setLoadingDash(false);
+      return;
+    }
     
     try {
       const data = await getProfessionalDashboard(prof.id);
@@ -89,6 +124,7 @@ export function Professionals() {
     setIsEditing(true);
     setEditForm({ name: '', role: '', commission_rate: 0, active: true, specialties: [], off_days: [0] });
     setSpecialtiesInput('');
+    setDashboardData(null);
   };
 
   const handleSave = async () => {
@@ -97,10 +133,28 @@ export function Professionals() {
       const specsArray = specialtiesInput.split(',').map(s => s.trim()).filter(Boolean);
       const payload = { ...editForm, specialties: specsArray };
 
+      if (import.meta.env.DEV && import.meta.env.VITE_ADMIN_PREVIEW === 'true') {
+        if (isCreating) {
+          const created = { ...payload, id: `preview-prof-${Date.now()}`, created_at: new Date().toISOString(), goals_monthly_revenue: payload.goals_monthly_revenue || 0, goals_appointments: payload.goals_appointments || 0 } as ProfessionalData;
+          setProfessionals(prev => [...prev, created]);
+          setSelectedProf(created);
+          setDashboardData({ totalRevenue: 0, totalAttendances: 0, averageTicket: 0, pendingCommission: 0, upcoming: [] });
+        } else if (selectedProf) {
+          const updated = { ...selectedProf, ...payload } as ProfessionalData;
+          setProfessionals(prev => prev.map(item => item.id === selectedProf.id ? updated : item));
+          setSelectedProf(updated);
+        }
+        setIsEditing(false);
+        setIsCreating(false);
+        return;
+      }
+
       if (isCreating) {
-        await createProfessional(payload);
+        const created = await createProfessional(payload);
+        await setProfessionalServices(created.id, payload.service_ids || []);
       } else if (selectedProf) {
         await updateProfessional(selectedProf.id, payload);
+        await setProfessionalServices(selectedProf.id, payload.service_ids || []);
       }
       
       await fetchTeam();
@@ -132,37 +186,38 @@ export function Professionals() {
   return (
     <div className="space-y-6">
       {/* HEADER E BUSCA */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white/40 p-6 rounded-3xl border border-aura-charcoal/5 shadow-sm">
+      <div className="glass-card flex flex-col justify-between gap-6 p-5 sm:p-7 lg:flex-row lg:items-center">
         <div className="space-y-1">
-          <h3 className="text-2xl font-serif italic text-aura-charcoal">A Nossa Equipa</h3>
+          <p className="admin-kicker">Pessoas e desempenho</p>
+          <h3 className="font-serif text-3xl font-semibold text-aura-charcoal">Equipe</h3>
           <p className="text-sm text-aura-charcoal/40">{professionals.filter(p => p.active).length} profissionais ativos</p>
         </div>
-        <div className="flex items-center gap-4 w-full md:w-auto">
-          <div className="relative w-full md:w-64">
+        <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
+          <div className="relative w-full lg:w-72">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-aura-charcoal/40" />
             <input 
               placeholder="Procurar membro..." 
-              className="w-full bg-white border border-aura-charcoal/10 rounded-full pl-10 pr-4 py-2.5 text-sm outline-none focus:ring-2 ring-aura-gold/20"
+              className="w-full bg-white border border-aura-charcoal/10 rounded-lg pl-10 pr-4 py-3 text-sm outline-none"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <button onClick={handleOpenCreate} className="aura-button aura-button-primary flex items-center gap-2 shadow-lg shadow-aura-charcoal/10 whitespace-nowrap">
+          <button onClick={handleOpenCreate} className="aura-button aura-button-primary flex items-center justify-center gap-2 rounded-lg shadow-lg shadow-aura-charcoal/10 whitespace-nowrap">
             <Plus className="w-4 h-4" /> Novo Membro
           </button>
         </div>
       </div>
 
       {/* GRID DE EQUIPA */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {filtered.map((prof, i) => (
           <motion.div 
             key={prof.id}
             initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
             onClick={() => handleOpenProfile(prof)}
             className={cn(
-              "glass-card p-6 cursor-pointer transition-all group flex flex-col border border-aura-charcoal/5",
-              !prof.active ? "opacity-60 grayscale hover:grayscale-0" : "hover:ring-2 hover:ring-aura-gold/30"
+              "glass-card min-h-[190px] p-5 sm:p-6 cursor-pointer transition-all group flex flex-col",
+              !prof.active ? "opacity-60 grayscale hover:grayscale-0" : "hover:-translate-y-1 hover:border-aura-gold/30 hover:shadow-xl"
             )}
           >
             <div className="flex items-start gap-4">
@@ -192,6 +247,14 @@ export function Professionals() {
           </motion.div>
         ))}
       </div>
+
+      {filtered.length === 0 && (
+        <div className="glass-card py-16 text-center">
+          <Search className="mx-auto h-8 w-8 text-aura-charcoal/20" />
+          <p className="mt-4 font-serif text-xl">Nenhum profissional encontrado</p>
+          <p className="mt-1 text-sm text-aura-charcoal/45">Tente outro nome ou cadastre um novo membro.</p>
+        </div>
+      )}
 
       {/* DRAWER RH & DASHBOARD */}
       <Drawer open={!!selectedProf || isCreating} onClose={() => { setSelectedProf(null); setIsCreating(false); }} title={isEditing ? (isCreating ? "Novo Membro" : "Editar Perfil") : "Painel do Profissional"}>
@@ -241,9 +304,22 @@ export function Professionals() {
                         <div className="absolute -right-4 -top-4 w-12 h-12 bg-aura-gold/10 rounded-full blur-xl"></div>
                         <p className="text-[9px] text-aura-gold uppercase tracking-widest font-bold mb-1 flex items-center gap-1"><DollarSign className="w-3 h-3"/> A Receber</p>
                         <p className="text-lg font-serif text-aura-gold font-bold">
-                          R$ {((dashboardData.totalRevenue * (selectedProf.commission_rate || 0)) / 100).toFixed(2)}
+                          R$ {dashboardData.pendingCommission.toFixed(2)}
                         </p>
                         <p className="text-[10px] text-aura-gold/60 mt-1">Taxa de {selectedProf.commission_rate || 0}%</p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-2xl border border-aura-charcoal/10 bg-white p-4">
+                        <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-aura-charcoal/45"><span>Meta de faturamento</span><span>{Math.min(Math.round((dashboardData.totalRevenue / Math.max(selectedProf.goals_monthly_revenue || 1, 1)) * 100), 100)}%</span></div>
+                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-aura-soft-gray"><div className="h-full rounded-full bg-aura-gold" style={{ width: `${Math.min((dashboardData.totalRevenue / Math.max(selectedProf.goals_monthly_revenue || 1, 1)) * 100, 100)}%` }} /></div>
+                        <p className="mt-2 text-[10px] text-aura-charcoal/45">R$ {dashboardData.totalRevenue.toFixed(2)} de R$ {(selectedProf.goals_monthly_revenue || 0).toFixed(2)}</p>
+                      </div>
+                      <div className="rounded-2xl border border-aura-charcoal/10 bg-white p-4">
+                        <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-aura-charcoal/45"><span>Meta de atendimentos</span><span>{Math.min(Math.round((dashboardData.totalAttendances / Math.max(selectedProf.goals_appointments || 1, 1)) * 100), 100)}%</span></div>
+                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-aura-soft-gray"><div className="h-full rounded-full bg-aura-sage" style={{ width: `${Math.min((dashboardData.totalAttendances / Math.max(selectedProf.goals_appointments || 1, 1)) * 100, 100)}%` }} /></div>
+                        <p className="mt-2 text-[10px] text-aura-charcoal/45">{dashboardData.totalAttendances} de {selectedProf.goals_appointments || 0} atendimentos</p>
                       </div>
                     </div>
 
@@ -294,8 +370,23 @@ export function Professionals() {
                     <label className="text-[10px] uppercase tracking-widest text-aura-charcoal/40 font-bold">Nome do Profissional</label>
                     <input className="w-full bg-white border border-aura-charcoal/10 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 ring-aura-gold/20" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} placeholder="Ex: Ana Silva" />
                   </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase tracking-widest text-aura-charcoal/40 font-bold">Serviços que realiza</label>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {serviceOptions.map(service => {
+                        const selected = (editForm.service_ids || []).includes(service.id);
+                        return (
+                          <button key={service.id} type="button" onClick={() => setEditForm({ ...editForm, service_ids: selected ? (editForm.service_ids || []).filter(id => id !== service.id) : [...(editForm.service_ids || []), service.id] })} className={cn('rounded-xl border px-3 py-3 text-left text-xs transition-colors', selected ? 'border-aura-gold bg-aura-gold/10 font-bold text-aura-charcoal' : 'border-aura-charcoal/10 bg-white text-aura-charcoal/55')}>
+                            {service.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[9px] text-aura-charcoal/40">Esses vínculos definem em quais serviços a profissional aparecerá no agendamento online.</p>
+                  </div>
                   
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-1">
                       <label className="text-[10px] uppercase tracking-widest text-aura-charcoal/40 font-bold">Cargo</label>
                       <input className="w-full bg-white border border-aura-charcoal/10 rounded-xl px-4 py-3 text-sm outline-none" value={editForm.role} onChange={e => setEditForm({...editForm, role: e.target.value})} placeholder="Ex: Cabelereira" />
@@ -304,6 +395,11 @@ export function Professionals() {
                       <label className="text-[10px] uppercase tracking-widest text-aura-charcoal/40 font-bold text-aura-gold">Comissão (%)</label>
                       <input type="number" className="w-full bg-white border border-aura-gold/30 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 ring-aura-gold/50" value={editForm.commission_rate} onChange={e => setEditForm({...editForm, commission_rate: Number(e.target.value)})} placeholder="Ex: 50" />
                     </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="space-y-1"><label className="text-[10px] uppercase tracking-widest text-aura-charcoal/40 font-bold">Meta mensal de faturamento</label><input type="number" min="0" step="0.01" className="w-full rounded-xl border border-aura-charcoal/10 bg-white px-4 py-3 text-sm outline-none" value={editForm.goals_monthly_revenue || 0} onChange={e => setEditForm({ ...editForm, goals_monthly_revenue: Number(e.target.value) })} /></div>
+                    <div className="space-y-1"><label className="text-[10px] uppercase tracking-widest text-aura-charcoal/40 font-bold">Meta mensal de atendimentos</label><input type="number" min="0" step="1" className="w-full rounded-xl border border-aura-charcoal/10 bg-white px-4 py-3 text-sm outline-none" value={editForm.goals_appointments || 0} onChange={e => setEditForm({ ...editForm, goals_appointments: Number(e.target.value) })} /></div>
                   </div>
 
                   <div className="space-y-1">

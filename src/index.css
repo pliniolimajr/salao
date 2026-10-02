@@ -1,23 +1,83 @@
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400&family=Plus+Jakarta+Sans:wght@300;400;500;600&display=swap');
 @import "tailwindcss";
 
+.admin-sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(216, 111, 141, 0.48) transparent;
+  scrollbar-gutter: stable;
+}
+
+.admin-sidebar-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.admin-sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.admin-sidebar-scroll::-webkit-scrollbar-thumb {
+  min-height: 48px;
+  border-radius: 999px;
+  background: rgba(216, 111, 141, 0.4);
+}
+
+.admin-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(239, 167, 186, 0.72);
+}
+
+.admin-sidebar-scroll::-webkit-scrollbar-button,
+.admin-sidebar-scroll::-webkit-scrollbar-corner {
+  display: none;
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
+.page-loading {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  background: #fffaf5;
+  color: #36454f;
+  font: 600 0.75rem/1 "Plus Jakarta Sans", sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 @theme {
   --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Cormorant Garamond", serif;
   
-  /* Editorial Palette: Strict reduction */
-  --color-aura-cream: #F5F0E8;
-  --color-aura-charcoal: #1A1714;
-  --color-aura-gold: #B8986A;
+  /* Studio Modesto: sistema compartilhado entre site e portal */
+  --color-aura-cream: #fffaf5;
+  --color-aura-charcoal: #36454f;
+  --color-aura-gold: #b84f70;
+  --color-aura-soft-gray: #f4eef0;
+  --color-aura-clay: #d86f8d;
+  --color-aura-sage: #6d8b79;
 }
 
 @layer base {
   body {
     @apply bg-aura-cream text-aura-charcoal font-sans antialiased selection:bg-aura-gold/20 selection:text-aura-charcoal;
   }
+
+  button, a, input, select, textarea {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-aura-gold/50 focus-visible:ring-offset-2;
+  }
   
   h1, h2, h3, h4, h5, h6 {
     @apply font-serif tracking-tight font-light;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply rounded-2xl border border-aura-charcoal/10 bg-white shadow-[0_18px_55px_rgba(54,69,79,0.07)];
+  }
+
+  .admin-kicker {
+    @apply text-[10px] font-bold uppercase tracking-[0.18em] text-aura-gold;
   }
 }
 

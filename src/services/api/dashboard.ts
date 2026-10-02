@@ -1,5 +1,5 @@
 import { supabase } from '../supabase';
-import { startOfDay, subDays, format, parseISO } from 'date-fns';
+import { differenceInCalendarDays, endOfDay, format, parseISO, startOfDay, startOfMonth, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 export interface DashboardData {
@@ -9,6 +9,7 @@ export interface DashboardData {
     newCustomers: number;
     stockAlerts: number;
   };
+  pendingAppointments: any[];
   todayAppointments: any[];
   birthdays: any[];
   newCustomers: any[];
@@ -17,18 +18,28 @@ export interface DashboardData {
   topProfessional: any;
 }
 
-export async function getDashboardData(daysRange: number = 7): Promise<DashboardData> {
+export type DashboardPeriod = 'today' | 'week' | 'month';
+
+export async function getDashboardData(period: DashboardPeriod = 'week'): Promise<DashboardData> {
   const today = new Date();
-  const startDate = startOfDay(subDays(today, daysRange));
+  const endDate = endOfDay(today);
+  const startDate = period === 'today'
+    ? startOfDay(today)
+    : period === 'month'
+      ? startOfMonth(today)
+      : startOfDay(subDays(today, 6));
+  const daysRange = differenceInCalendarDays(endDate, startDate) + 1;
   const thirtyDaysAgo = startOfDay(subDays(today, 30));
 
   // 1. Buscar Agendamentos do período (para contar pendentes e faturamento do Top Profissional)
   const { data: appointments, error: apptError } = await supabase
     .from('appointments')
     .select('*')
-    .gte('start_time', startDate.toISOString());
+    .gte('start_time', startDate.toISOString())
+    .lte('start_time', endDate.toISOString())
+    .order('start_time', { ascending: true });
 
-  if (apptError) console.error("Erro em appointments:", apptError);
+  if (apptError) throw new Error(apptError.message);
 
   // Separar Agendamentos de HOJE para a lista principal
   const startOfToday = startOfDay(today);
@@ -36,21 +47,28 @@ export async function getDashboardData(daysRange: number = 7): Promise<Dashboard
   endOfToday.setDate(endOfToday.getDate() + 1);
 
   const todayAppointments = appointments?.filter(a =>
-    new Date(a.start_time) >= startOfToday && new Date(a.start_time) < endOfToday
+    new Date(a.start_time) >= startOfToday &&
+    new Date(a.start_time) < endOfToday &&
+    (a.status === 'scheduled' || a.status === 'confirmed')
   ) || [];
 
-  // Contar apenas os pendentes do período (agendados ou confirmados)
-  const pendingAppointmentsCount = appointments?.filter(a =>
+  // Manter a contagem e a listagem baseadas exatamente nos mesmos registros.
+  const pendingAppointments = appointments?.filter(a =>
     a.status === 'scheduled' || a.status === 'confirmed'
-  ).length || 0;
+  ) || [];
+  const pendingAppointmentsCount = pendingAppointments.length;
 
 
   // 2. Transações (Para calcular a Receita real do período e o Gráfico)
-  const { data: transactions } = await supabase
+  const { data: transactions, error: transactionsError } = await supabase
     .from('transactions')
     .select('*')
     .gte('date', startDate.toISOString())
-    .eq('type', 'income');
+    .lte('date', endDate.toISOString())
+    .eq('type', 'income')
+    .eq('status', 'pago');
+
+  if (transactionsError) throw new Error(transactionsError.message);
 
   const totalRevenue = transactions?.reduce((sum, tx) => sum + Number(tx.amount), 0) || 0;
 
@@ -115,7 +133,6 @@ export async function getDashboardData(daysRange: number = 7): Promise<Dashboard
         topProf = {
           name: profDetails.name,
           role: profDetails.role,
-          rating: 4.9, // Pode ser dinâmico no futuro se houver sistema de avaliação
           appointments: profRevenue[bestProfId].count,
           revenue: maxRev
         };
@@ -128,7 +145,6 @@ export async function getDashboardData(daysRange: number = 7): Promise<Dashboard
     topProf = {
       name: professionals[0].name,
       role: professionals[0].role,
-      rating: 5.0,
       appointments: 0,
       revenue: 0
     };
@@ -171,6 +187,7 @@ export async function getDashboardData(daysRange: number = 7): Promise<Dashboard
       newCustomers: newCustomersData?.length || 0,
       stockAlerts: criticalStock.length
     },
+    pendingAppointments,
     todayAppointments,
     birthdays,
     newCustomers: newCustomersData || [],
