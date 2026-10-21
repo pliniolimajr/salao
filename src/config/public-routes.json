@@ -1,0 +1,10 @@
+[
+  { "path": "/", "title": "Studio Modesto em Salvador", "description": "Cabelo, unhas e cuidados com a pele no Bonfim, em Salvador. Conheça o Studio Modesto e agende seu momento." },
+  { "path": "/o-studio", "title": "O Studio", "description": "Conheça o jeito de cuidar do Studio Modesto, no Bonfim, em Salvador." },
+  { "path": "/servicos", "title": "Serviços", "description": "Cabelo, mãos, pés e cuidados com a pele no Studio Modesto. Consulte serviços, valores e horários." },
+  { "path": "/servicos/cabelo", "title": "Cabelo", "description": "Corte, escova, cor e tratamentos que acompanham sua rotina e valorizam o seu jeito." },
+  { "path": "/servicos/maos-e-pes", "title": "Mãos & pés", "description": "Um momento de pausa, cuidado e atenção ao acabamento." },
+  { "path": "/servicos/pele", "title": "Pele", "description": "Cuidados faciais com atenção ao que sua pele precisa." },
+  { "path": "/contato", "title": "Contato", "description": "Visite o Studio Modesto: R. Duarte da Costa, 69, Bonfim, Salvador. Segunda a sábado, das 09h às 18h." },
+  { "path": "/fidelidade", "title": "Fidelidade", "description": "Conheça o clube de fidelidade do Studio Modesto e consulte seus pontos." }
+]

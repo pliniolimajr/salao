@@ -1,5 +1,6 @@
+import { ModalSurface } from '../components/ModalSurface';
 import React, { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, MotionConfig } from "motion/react";
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -25,6 +26,7 @@ import { Service, Professional } from "../types";
 
 interface BookingFlowProps {
   isOpen: boolean;
+  initialServiceId?: string;
   onClose: () => void;
 }
 
@@ -55,7 +57,7 @@ const TIME_SLOTS = [
   "17:00",
 ];
 
-export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
+export function BookingFlow({ isOpen, onClose, initialServiceId }: BookingFlowProps) {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -159,6 +161,8 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
           ]);
           setServices(servicesData);
           setProfessionals(profsData);
+          const initialService = servicesData.find(service => service.id === initialServiceId);
+          if (initialService) { setSelectedService(initialService); setStep(2); }
         } catch (error) {
           console.error("Erro ao carregar dados:", error);
           setInitialLoadError("Não foi possível carregar a agenda agora. Feche esta janela e tente novamente.");
@@ -178,7 +182,7 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
       setBookedIntervals([]);
       setCustomerInfo({ name: "", phone: "", email: "", birthday: "" });
     }
-  }, [isOpen]);
+  }, [isOpen, initialServiceId]);
 
   useEffect(() => {
     if (!isOpen || !selectedProf || !selectedService) {
@@ -293,7 +297,7 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
+    <ModalSurface label="Agendar horário" onClose={onClose}><MotionConfig reducedMotion="user">
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -306,7 +310,7 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
         initial={{ opacity: 0, y: 100, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 100, scale: 0.95 }}
-        className="w-full max-w-4xl bg-aura-cream rounded-[2rem] shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[92vh] border border-white/60"
+        className="w-full max-w-4xl bg-aura-cream rounded-lg shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[90dvh] border border-white/60"
       >
         {/* Header do Modal */}
         <div className="min-h-20 border-b border-aura-charcoal/5 flex items-center justify-between gap-4 px-5 py-4 sm:px-8 bg-white/60 backdrop-blur-sm shrink-0">
@@ -331,6 +335,7 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
           )}
           <button
             onClick={onClose}
+            aria-label="Fechar janela"
             className="p-2 rounded-full hover:bg-aura-charcoal/5 text-aura-charcoal/40 hover:text-aura-charcoal transition-colors"
           >
             <X className="w-5 h-5" />
@@ -348,6 +353,7 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
             <div role="alert" className="flex min-h-64 flex-col items-center justify-center rounded-3xl border border-red-100 bg-red-50/60 p-8 text-center">
               <p className="font-serif text-xl text-aura-charcoal">A agenda demorou para responder.</p>
               <p className="mt-2 max-w-sm text-sm leading-relaxed text-aura-charcoal/55">{initialLoadError}</p>
+              <a href="https://wa.me/5571992106043" target="_blank" rel="noreferrer" className="mt-5 inline-flex min-h-11 items-center text-sm font-semibold text-aura-charcoal underline underline-offset-4">Agendar pelo WhatsApp</a>
               <button type="button" onClick={onClose} className="aura-button aura-button-primary mt-6">Fechar e tentar novamente</button>
             </div>
           )}
@@ -797,6 +803,6 @@ export function BookingFlow({ isOpen, onClose }: BookingFlowProps) {
           ) : null}
         </div>
       </motion.div>
-    </div>
+    </MotionConfig></ModalSurface>
   );
 }

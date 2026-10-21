@@ -2,7 +2,8 @@ import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
-import { LandingPage } from './pages/LandingPage';
+import { PublicRoutes } from './components/layout/PublicRoutes';
+import { SiteMetadata } from './components/SiteMetadata';
 
 const Login = lazy(() => import('./pages/Login').then(({ Login }) => ({ default: Login })));
 const Dashboard = lazy(() => import('./pages/Dashboard').then(({ Dashboard }) => ({ default: Dashboard })));
@@ -21,10 +22,9 @@ function PageFallback() {
 
 export default function App() {
   return (
-    <Suspense fallback={<PageFallback />}>
+    <><SiteMetadata /><Suspense fallback={<PageFallback />}>
       <Routes>
       {/* Rotas Públicas */}
-      <Route path="/" element={<LandingPage onEnterPortal={() => window.location.assign('/login')} />} />
       <Route path="/login" element={<Login />} />
 
       {/* Rotas Protegidas */}
@@ -41,9 +41,8 @@ export default function App() {
         <Route path="reports" element={<Reports />} />
       </Route>
       
-      {/* Fallback 404 */}
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="/*" element={<PublicRoutes />} />
       </Routes>
-    </Suspense>
+    </Suspense></>
   );
 }

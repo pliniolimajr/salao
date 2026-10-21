@@ -1,13 +1,14 @@
 import { supabase } from '../supabase';
 import { Service } from '../../types';
 
-export async function getActiveServices(): Promise<Service[]> {
-  const { data, error } = await supabase
+export async function getActiveServices(signal?: AbortSignal): Promise<Service[]> {
+  const query = supabase
     .from('services')
     .select('*')
     .eq('active', true)
     .order('category', { ascending: true })
     .order('name', { ascending: true });
+  const { data, error } = await (signal ? query.abortSignal(signal) : query);
 
   if (error) throw new Error(error.message);
   return data || [];

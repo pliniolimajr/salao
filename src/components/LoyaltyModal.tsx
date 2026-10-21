@@ -1,5 +1,6 @@
+import { ModalSurface } from './ModalSurface';
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, MotionConfig } from 'motion/react';
 import { X, Search, Sparkles, Phone, Award, Award as Crown, ArrowRight, Loader2, Calendar, Star } from 'lucide-react';
 import { getCustomerByPhone, PublicLoyaltyCustomer, CustomerCRMData } from '../services/api/customers';
 import { LOYALTY_POINTS_PER_APPOINTMENT, LOYALTY_REWARD_POINTS, loyaltyProgress } from '../config/loyalty';
@@ -74,7 +75,7 @@ export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
+    <ModalSurface label="Clube de fidelidade" onClose={onClose}><MotionConfig reducedMotion="user">
       {/* Backdrop */}
       <motion.div
         initial={{ opacity: 0 }}
@@ -89,8 +90,8 @@ export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
         initial={{ opacity: 0, y: 50, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 50, scale: 0.95 }}
-        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="w-full max-w-lg bg-aura-cream border border-white/60 rounded-[2rem] shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[92vh]"
+        transition={{ duration: 0.24, ease: [0.23, 1, 0.32, 1] }}
+        className="w-full max-w-lg bg-aura-cream border border-white/60 rounded-lg shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[90dvh]"
       >
         {/* Header */}
         <div className="min-h-20 border-b border-aura-charcoal/5 flex items-center justify-between px-5 py-4 sm:px-8 bg-white/60 backdrop-blur-sm shrink-0">
@@ -100,6 +101,7 @@ export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
           </div>
           <button
             onClick={onClose}
+            aria-label="Fechar janela"
             className="p-2 rounded-full hover:bg-aura-charcoal/5 text-aura-charcoal/40 hover:text-aura-charcoal transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -229,7 +231,7 @@ export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
                   <div className="text-center pt-2">
                     {customer.loyalty_points >= LOYALTY_REWARD_POINTS ? (
                       <p className="text-xs text-aura-gold font-semibold flex items-center justify-center gap-1">
-                        <Sparkles className="w-4 h-4 animate-bounce" /> Meta completa! Seu brinde está disponível.
+                        <Sparkles className="w-4 h-4" /> Meta completa! Seu brinde está disponível.
                       </p>
                     ) : (
                       <p className="text-[11px] text-white/50 leading-relaxed font-light">
@@ -325,6 +327,6 @@ export function LoyaltyModal({ isOpen, onClose }: LoyaltyModalProps) {
           </AnimatePresence>
         </div>
       </motion.div>
-    </div>
+    </MotionConfig></ModalSurface>
   );
 }

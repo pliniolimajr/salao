@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig } from 'vite';
 
-export default defineConfig(() => ({
+export default defineConfig(({ isSsrBuild }) => ({
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
@@ -13,7 +13,7 @@ export default defineConfig(() => ({
     build: {
       rollupOptions: {
         output: {
-          manualChunks: {
+          manualChunks: isSsrBuild ? undefined : {
             react: ['react', 'react-dom', 'react-router-dom'],
             supabase: ['@supabase/supabase-js'],
             motion: ['motion'],
